@@ -129,8 +129,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="p-6 border-b border-gray-100 flex items-center justify-between group">
             <div className="flex items-center gap-3">
               <BrandLogo
-                imageClassName="h-9 w-9 transform transition-transform group-hover:scale-110"
-                textClassName="font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent"
+                imageClassName="h-12 w-12 sm:h-14 sm:w-14 transform transition-transform group-hover:scale-110"
+                textClassName="text-xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent"
               />
             </div>
             <button

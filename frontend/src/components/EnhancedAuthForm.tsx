@@ -662,8 +662,8 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
             <div className="text-center pt-6">
               <BrandLogo
                 className="justify-center mb-3"
-                imageClassName="h-12 w-12"
-                textClassName="text-3xl font-semibold tracking-tight text-slate-900"
+                imageClassName="h-24 w-24 sm:h-28 sm:w-28 md:h-32 md:w-32"
+                textClassName="text-[clamp(2.2rem,3.8vw,3.5rem)] leading-none font-semibold tracking-tight text-slate-900"
               />
               <CardTitle className={`text-3xl ${roleStyle.titleClass}`}>
                 {effectiveMode === 'login' ? 'Welcome Back' : `Create ${roleStyle.label} Account`}

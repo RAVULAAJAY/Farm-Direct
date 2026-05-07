@@ -79,8 +79,8 @@ const RoleSelection: React.FC<RoleSelectionProps> = ({ onSelectRole, onBack }) =
             <div className="mx-auto mb-6 h-px w-24 bg-gradient-to-r from-transparent via-emerald-400 to-transparent" />
             <BrandLogo
               className="justify-center mb-3"
-              imageClassName="h-10 w-10 sm:h-12 sm:w-12"
-              textClassName="text-4xl sm:text-5xl font-semibold tracking-tight text-slate-900"
+              imageClassName="h-28 w-28 sm:h-32 sm:w-32 md:h-36 md:w-36"
+              textClassName="text-[clamp(2.75rem,5.4vw,4.6rem)] leading-none font-semibold tracking-tight text-slate-900"
             />
             <p className="mx-auto max-w-3xl text-lg text-slate-600">
               Choose your role to continue

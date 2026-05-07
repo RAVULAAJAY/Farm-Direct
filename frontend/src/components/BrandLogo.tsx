@@ -16,7 +16,7 @@ const BrandLogo: React.FC<BrandLogoProps> = ({
   return (
     <div className={`inline-flex items-center gap-3 ${className}`}>
       <img
-        src="/favicon-v2.png"
+        src="/brand%20logo.png"
         alt="FarmDirect logo"
         className={`block shrink-0 object-contain ${imageClassName}`}
       />

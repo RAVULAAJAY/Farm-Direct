@@ -39,8 +39,8 @@ const RoleSelectionSignup: React.FC<RoleSelectionSignupProps> = ({ onSelectRole,
             <div className="mx-auto mb-6 h-px w-24 bg-gradient-to-r from-transparent via-emerald-400 to-transparent" />
             <BrandLogo
               className="justify-center mb-4"
-              imageClassName="h-10 w-10 sm:h-12 sm:w-12"
-              textClassName="text-5xl font-semibold tracking-tight text-slate-900 sm:text-6xl"
+              imageClassName="h-28 w-28 sm:h-32 sm:w-32 md:h-36 md:w-36"
+              textClassName="text-[clamp(2.75rem,5.4vw,4.6rem)] leading-none font-semibold tracking-tight text-slate-900"
             />
             <p className="mx-auto mb-6 max-w-3xl text-lg leading-8 text-slate-600 sm:text-xl">
               Create an account and start connecting directly with farmers or buyers.

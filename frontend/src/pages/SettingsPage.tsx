@@ -187,7 +187,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
       const brandedGreen = '#15803d';
       const brandDark = '#0f172a';
       let cursorY = 18;
-      const brandLogo = await loadImageDataUrl('/favicon-v2.png');
+      const brandLogo = await loadImageDataUrl('/brand%20logo.png');
 
       pdf.setFillColor(16, 99, 47);
       pdf.rect(0, 0, pageWidth, 38, 'F');
