@@ -1,4 +1,4 @@
-import { Product, User, Order } from '@/lib/data';
+import { Product, ProductReview, User, Order } from '@/lib/data';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:4000/api';
 
@@ -23,6 +23,11 @@ export const fetchProducts = () => request<Product[]>('/products');
 export const createProduct = (product: Omit<Product, 'id' | 'createdAt'>) => request<Product>('/products', { method: 'POST', body: JSON.stringify(product) });
 export const updateProductApi = (id: string, updates: Partial<Product>) => request<Product>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 export const deleteProductApi = (id: string) => request<{ success: boolean }>(`/products/${id}`, { method: 'DELETE' });
+export const addProductReview = (productId: string, review: Omit<ProductReview, 'id' | 'timestamp' | 'helpful' | 'notHelpful'> & { timestamp?: string; helpful?: number; notHelpful?: number }) =>
+  request<Product>(`/products/${productId}/reviews`, {
+    method: 'POST',
+    body: JSON.stringify(review),
+  });
 
 export const fetchOrders = () => request<Order[]>('/orders');
 export const createOrder = (order: Omit<Order, 'id' | 'orderDate' | 'status' | 'deliveryStatus'>) => request<Order>('/orders', { method: 'POST', body: JSON.stringify(order) });

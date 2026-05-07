@@ -66,7 +66,7 @@ const ProductDetailsPageWrapper = () => {
         phone: farmerUser?.phone || 'Not available',
         location: product.location || farmerUser?.location || 'Unknown',
         rating: product.rating ?? 0,
-        reviews: product.reviews ?? 0,
+        reviews: product.reviewEntries?.length ?? product.reviews ?? 0,
         totalSales: 0,
         joinDate: farmerUser?.createdAt ? new Date(farmerUser.createdAt).toLocaleDateString() : 'Not available',
         certifications: [],

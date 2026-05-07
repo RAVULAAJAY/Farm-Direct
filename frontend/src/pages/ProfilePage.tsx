@@ -38,7 +38,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
   const [searchParams, setSearchParams] = useSearchParams();
   const [isEditing, setIsEditing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  const [paymentSaveStatus, setPaymentSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [completionError, setCompletionError] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+  const [isPaymentEditing, setIsPaymentEditing] = useState(false);
   const [formData, setFormData] = useState({
     name: user.name,
     email: user.email,
@@ -46,6 +49,13 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
     location: user.location,
     farmName: user.farmName ?? `${user.name}'s Farm`,
     farmDetails: user.farmDetails ?? '',
+  });
+  const [paymentFormData, setPaymentFormData] = useState({
+    bankName: user.paymentDetails?.bankName ?? '',
+    accountNumber: user.paymentDetails?.accountNumber ?? '',
+    ifscOrUpi: user.paymentDetails?.ifscOrUpi ?? '',
+    upiQrCodeDataUrl: user.paymentDetails?.upiQrCodeDataUrl ?? '',
+    upiQrCodeFileName: user.paymentDetails?.upiQrCodeFileName ?? '',
   });
 
   useEffect(() => {
@@ -56,6 +66,14 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
       location: user.location,
       farmName: user.farmName ?? `${user.name}'s Farm`,
       farmDetails: user.farmDetails ?? '',
+    });
+
+    setPaymentFormData({
+      bankName: user.paymentDetails?.bankName ?? '',
+      accountNumber: user.paymentDetails?.accountNumber ?? '',
+      ifscOrUpi: user.paymentDetails?.ifscOrUpi ?? '',
+      upiQrCodeDataUrl: user.paymentDetails?.upiQrCodeDataUrl ?? '',
+      upiQrCodeFileName: user.paymentDetails?.upiQrCodeFileName ?? '',
     });
   }, [user]);
 
@@ -199,6 +217,74 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
       farmDetails: user.farmDetails ?? '',
     });
     setIsEditing(false);
+  };
+
+  const handlePaymentCancel = () => {
+    setPaymentFormData({
+      bankName: user.paymentDetails?.bankName ?? '',
+      accountNumber: user.paymentDetails?.accountNumber ?? '',
+      ifscOrUpi: user.paymentDetails?.ifscOrUpi ?? '',
+      upiQrCodeDataUrl: user.paymentDetails?.upiQrCodeDataUrl ?? '',
+      upiQrCodeFileName: user.paymentDetails?.upiQrCodeFileName ?? '',
+    });
+    setPaymentError('');
+    setIsPaymentEditing(false);
+  };
+
+  const handlePaymentQrUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) {
+      return;
+    }
+
+    if (!selectedFile.type.startsWith('image/')) {
+      setPaymentError('Please upload an image file for the UPI QR code.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      setPaymentFormData((prev) => ({
+        ...prev,
+        upiQrCodeDataUrl: result,
+        upiQrCodeFileName: selectedFile.name,
+      }));
+      setPaymentError('');
+    };
+
+    reader.onerror = () => {
+      setPaymentError('Unable to read this QR image. Please try another file.');
+    };
+
+    reader.readAsDataURL(selectedFile);
+    event.target.value = '';
+  };
+
+  const handlePaymentSave = () => {
+    const bankName = paymentFormData.bankName.trim();
+    const accountNumber = paymentFormData.accountNumber.trim();
+    const ifscOrUpi = paymentFormData.ifscOrUpi.trim();
+
+    if (!bankName || !accountNumber || !ifscOrUpi) {
+      setPaymentError('Please fill bank name, account number, and IFSC/UPI before saving.');
+      return;
+    }
+
+    updateUser(user.id, {
+      paymentDetails: {
+        bankName,
+        accountNumber,
+        ifscOrUpi,
+        upiQrCodeDataUrl: paymentFormData.upiQrCodeDataUrl || undefined,
+        upiQrCodeFileName: paymentFormData.upiQrCodeFileName || undefined,
+      },
+    });
+
+    setPaymentError('');
+    setPaymentSaveStatus('saved');
+    setIsPaymentEditing(false);
+    window.setTimeout(() => setPaymentSaveStatus('idle'), 2000);
   };
 
   const roleStyle = getRoleClassName(user.role);
@@ -485,29 +571,101 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
         <Card>
           <CardHeader>
             <CardTitle>Payment Info</CardTitle>
-            <CardDescription>Manage payout details used for farmer orders.</CardDescription>
+            <CardDescription>Manage payout details and UPI QR code shown to buyers.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <Label>Bank Name</Label>
-                <Input value={user.paymentDetails?.bankName ?? 'Not added'} disabled className="bg-gray-50" />
+                <Input
+                  value={paymentFormData.bankName}
+                  onChange={(event) =>
+                    setPaymentFormData((prev) => ({ ...prev, bankName: event.target.value }))
+                  }
+                  disabled={!isPaymentEditing}
+                  className={!isPaymentEditing ? 'bg-gray-50' : ''}
+                  placeholder="Enter bank name"
+                />
               </div>
               <div>
                 <Label>Account Number</Label>
-                <Input value={user.paymentDetails?.accountNumber ?? 'Not added'} disabled className="bg-gray-50" />
+                <Input
+                  value={paymentFormData.accountNumber}
+                  onChange={(event) =>
+                    setPaymentFormData((prev) => ({ ...prev, accountNumber: event.target.value }))
+                  }
+                  disabled={!isPaymentEditing}
+                  className={!isPaymentEditing ? 'bg-gray-50' : ''}
+                  placeholder="Enter account number"
+                />
               </div>
               <div>
                 <Label>IFSC / UPI</Label>
-                <Input value={user.paymentDetails?.ifscOrUpi ?? 'Not added'} disabled className="bg-gray-50" />
+                <Input
+                  value={paymentFormData.ifscOrUpi}
+                  onChange={(event) =>
+                    setPaymentFormData((prev) => ({ ...prev, ifscOrUpi: event.target.value }))
+                  }
+                  disabled={!isPaymentEditing}
+                  className={!isPaymentEditing ? 'bg-gray-50' : ''}
+                  placeholder="Enter IFSC code or UPI ID"
+                />
               </div>
             </div>
-            <Button
-              className="w-full bg-green-600 hover:bg-green-700"
-              onClick={() => navigate('/farmer/payment-setup')}
-            >
-              {user.paymentDetails ? 'Update Payment Info' : 'Add Payment Info'}
-            </Button>
+
+            <div className="space-y-2">
+              <Label>UPI QR Code</Label>
+              {paymentFormData.upiQrCodeDataUrl ? (
+                <div className="rounded-lg border bg-gray-50 p-4">
+                  <img
+                    src={paymentFormData.upiQrCodeDataUrl}
+                    alt="UPI QR code"
+                    className="mx-auto h-52 w-52 rounded-md border bg-white object-contain"
+                  />
+                  <p className="mt-3 text-center text-sm font-medium text-gray-900">
+                    {paymentFormData.upiQrCodeFileName || 'UPI QR image'}
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-gray-600">
+                  No UPI QR uploaded yet.
+                </div>
+              )}
+
+              {isPaymentEditing && (
+                <Input
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  onChange={handlePaymentQrUpload}
+                />
+              )}
+            </div>
+
+            {paymentError && <p className="text-sm text-red-700">{paymentError}</p>}
+            {paymentSaveStatus === 'saved' && (
+              <p className="text-sm text-green-700">Payment information updated successfully.</p>
+            )}
+
+            {!isPaymentEditing ? (
+              <Button
+                className="w-full bg-green-600 hover:bg-green-700"
+                onClick={() => {
+                  setIsPaymentEditing(true);
+                  setPaymentError('');
+                }}
+              >
+                {user.paymentDetails ? 'Edit Payment Info' : 'Add Payment Info'}
+              </Button>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Button className="bg-green-600 hover:bg-green-700" onClick={handlePaymentSave}>
+                  Update Payment Info
+                </Button>
+                <Button variant="outline" onClick={handlePaymentCancel}>
+                  Cancel
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

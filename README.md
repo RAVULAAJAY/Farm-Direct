@@ -1,28 +1,54 @@
-# Testingproject
+# 🌾 Farm Direct - Marketplace Platform
 
-This repository contains the FarmDirect application in the `harvest-connect-mobile-main/` folder.
+A comprehensive **farmer-to-buyer marketplace** built with modern technologies: React, Vite, TypeScript, Tailwind CSS, Express.js, and Shadcn/UI.
 
-FarmDirect is a farmer-to-buyer marketplace built with Vite, React, TypeScript, Tailwind CSS, and shadcn/ui-style components. It supports role-based onboarding, farmer product management, buyer shopping flows, admin moderation, local API-backed data, proof uploads, PDF export, chat, notifications, and location-based discovery.
+## 📋 Quick Navigation
 
-## What Is In This Repo
+- **Quick Start**: See [QUICK_START.md](QUICK_START.md)
+- **Full Setup**: See [COMPLETE_SETUP.md](COMPLETE_SETUP.md)
+- **Backend Docs**: See [backend/README.md](backend/README.md)
+- **Frontend Docs**: See [frontend/README.md](frontend/README.md)
 
-- `harvest-connect-mobile-main/` - the main FarmDirect application
-- `vercel.json` - root deployment routing configuration
-- `.vscode/` - workspace settings
+## 🚀 Quick Start (2 min setup)
 
-## Main Project
-
-For the full project documentation, setup steps, workflow details, feature list, and architecture notes, open:
-
-- [FarmDirect README](harvest-connect-mobile-main/README.md)
-
-## Quick Start
-
-```sh
-cd harvest-connect-mobile-main
+### Terminal 1: Start Backend
+```bash
+cd backend
 npm install
-npm run server
+npm start
+# http://localhost:4000
+```
+
+### Terminal 2: Start Frontend
+```bash
+cd frontend
+npm install
 npm run dev
+# http://localhost:8080
+```
+
+**Visit**: http://localhost:8080
+
+## 📁 Project Structure
+
+```
+Farm-Direct/
+├── backend/              Express.js API Server
+│   ├── server.cjs       Main server (CommonJS)
+│   ├── package.json     Backend dependencies
+│   ├── data/            JSON database
+│   ├── SETUP.md         Backend guide
+│   └── README.md        API documentation
+│
+├── frontend/             React + Vite Application
+│   ├── src/             React source code
+│   ├── package.json     Frontend dependencies
+│   ├── SETUP.md         Frontend guide
+│   └── README.md        Frontend docs
+│
+├── QUICK_START.md       Quick reference guide
+├── COMPLETE_SETUP.md    Comprehensive setup
+└── README.md            This file
 ```
 
 ## Key Features

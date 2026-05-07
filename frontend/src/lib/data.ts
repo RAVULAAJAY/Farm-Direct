@@ -29,6 +29,22 @@ export interface Product {
   available: boolean;
   harvestDate: string;
   createdAt?: string;
+  reviewEntries?: ProductReview[];
+}
+
+export interface ProductReview {
+  id: string;
+  userId: string;
+  userName: string;
+  rating: number;
+  title: string;
+  content: string;
+  timestamp: string;
+  verified: boolean;
+  helpful: number;
+  notHelpful: number;
+  images?: string[];
+  purchaseVerified?: boolean;
 }
 
 export interface Order {

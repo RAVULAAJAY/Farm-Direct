@@ -1,0 +1,17 @@
+{
+  "name": "farm-direct-backend",
+  "version": "1.0.0",
+  "description": "Farm Direct API Server",
+  "main": "server.cjs",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "dev": "node server.cjs"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "cors": "^2.8.6",
+    "uuid": "^13.0.0",
+    "body-parser": "^2.2.2"
+  }
+}

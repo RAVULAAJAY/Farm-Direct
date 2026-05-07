@@ -1,0 +1,11 @@
+# Backend Data Storage
+data/
+
+# Node modules
+node_modules/
+npm-debug.log
+package-lock.json
+
+# Environment variables
+.env
+.env.local

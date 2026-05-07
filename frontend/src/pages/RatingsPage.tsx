@@ -3,14 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Star, ShoppingBag, MessageSquare } from 'lucide-react';
+import { Star, ShoppingBag, MessageSquare, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGlobalState } from '@/context/GlobalStateContext';
+
+type FarmerReviewItem = {
+  id: string;
+  buyerName: string;
+  rating: number;
+  comment: string;
+  productName: string;
+  timestamp: string;
+};
 
 const RatingsPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { products, orders } = useGlobalState();
+  const { products, orders, messages, notifications } = useGlobalState();
 
   const farmerProducts = useMemo(() => {
     if (!currentUser || currentUser.role !== 'farmer') {
@@ -44,6 +53,91 @@ const RatingsPage: React.FC = () => {
       averageRating,
     };
   }, [farmerProducts]);
+
+  const farmerReviewItems = useMemo<FarmerReviewItem[]>(() => {
+    if (!currentUser || currentUser.role !== 'farmer') {
+      return [];
+    }
+
+    const feedbackMessagePattern =
+      /^Rating feedback for order #(.+?) \((.+?)\):\s*(\d(?:\.\d+)?)\/5 stars\.\s*(.*)$/i;
+    const ratingNotificationPattern = /^(.*?) rated (.*?) (\d(?:\.\d+)?)\/5\./i;
+    const items: FarmerReviewItem[] = [];
+
+    const feedbackMessages = messages
+      .filter((entry) => entry.recipientId === currentUser.id)
+      .filter((entry) => entry.content.startsWith('Rating feedback for order #'));
+
+    for (const entry of feedbackMessages) {
+      const match = entry.content.match(feedbackMessagePattern);
+      if (!match) {
+        continue;
+      }
+
+      const [, , productName, ratingRaw, comment] = match;
+      const parsedRating = Number(ratingRaw);
+      const safeRating = Number.isFinite(parsedRating)
+        ? Math.max(1, Math.min(5, parsedRating))
+        : 0;
+
+      items.push({
+        id: `message-${entry.id}`,
+        buyerName: entry.senderName,
+        rating: safeRating,
+        comment: comment.trim() || 'No written comment provided.',
+        productName,
+        timestamp: entry.timestamp,
+      });
+    }
+
+    const seenSignatures = new Set(
+      items.map(
+        (entry) =>
+          `${entry.buyerName.toLowerCase()}|${entry.productName.toLowerCase()}|${entry.rating.toFixed(1)}`
+      )
+    );
+
+    const ratingNotifications = notifications
+      .filter((entry) => entry.userId === currentUser.id && entry.title === 'New buyer rating received')
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    for (const entry of ratingNotifications) {
+      const match = entry.message.match(ratingNotificationPattern);
+      if (!match) {
+        continue;
+      }
+
+      const [, buyerName, productName, ratingRaw] = match;
+      const parsedRating = Number(ratingRaw);
+      const safeRating = Number.isFinite(parsedRating)
+        ? Math.max(1, Math.min(5, parsedRating))
+        : 0;
+      const signature = `${buyerName.toLowerCase()}|${productName.toLowerCase()}|${safeRating.toFixed(1)}`;
+
+      if (seenSignatures.has(signature)) {
+        continue;
+      }
+
+      seenSignatures.add(signature);
+      items.push({
+        id: `notification-${entry.id}`,
+        buyerName,
+        rating: safeRating,
+        comment: 'Buyer submitted a star rating without a written comment.',
+        productName,
+        timestamp: entry.timestamp,
+      });
+    }
+
+    return items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [currentUser, messages, notifications]);
+
+  const formatReviewDate = (timestamp: string) =>
+    new Date(timestamp).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
 
   if (!currentUser) {
     return (
@@ -205,6 +299,57 @@ const RatingsPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Buyer Reviews</CardTitle>
+          <CardDescription>Live feedback submitted by buyers from delivered orders.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {farmerReviewItems.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-8 text-center">
+              <MessageCircle className="mx-auto h-8 w-8 text-gray-400" />
+              <p className="mt-3 text-sm text-gray-600">
+                No buyer reviews yet. Ratings and comments will appear here once buyers submit feedback.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {farmerReviewItems.map((review) => (
+                <article
+                  key={review.id}
+                  className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1">
+                      <h3 className="text-base font-semibold tracking-tight text-gray-900">{review.buyerName}</h3>
+                      <p className="text-sm text-gray-600">Reviewed {review.productName}</p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <Badge variant="secondary" className="bg-amber-50 text-amber-700 hover:bg-amber-50">
+                        {review.rating.toFixed(1)} / 5
+                      </Badge>
+                      <div className="flex items-center gap-0.5 text-amber-500">
+                        {Array.from({ length: 5 }).map((_, index) => {
+                          const filled = index < Math.round(review.rating);
+                          return <Star key={index} className={`h-4 w-4 ${filled ? 'fill-current' : ''}`} />;
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-sm leading-7 text-gray-800">{review.comment}</p>
+
+                  <p className="mt-4 text-xs font-medium uppercase tracking-wide text-gray-500">
+                    {formatReviewDate(review.timestamp)}
+                  </p>
+                </article>
               ))}
             </div>
           )}

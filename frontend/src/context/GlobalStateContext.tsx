@@ -1,6 +1,7 @@
 ﻿import React, { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import {
   Product,
+  ProductReview,
   Order,
 } from '@/lib/data';
 import * as api from '@/lib/api';
@@ -12,6 +13,8 @@ export interface FarmerPaymentDetails {
   bankName: string;
   accountNumber: string;
   ifscOrUpi: string;
+  upiQrCodeDataUrl?: string;
+  upiQrCodeFileName?: string;
 }
 
 export interface ActivityLog {
@@ -220,6 +223,7 @@ export interface GlobalStateContextType {
   products: Product[];
   addProduct: (product: Product) => void;
   updateProduct: (id: string, product: Partial<Product>) => void;
+  addProductReview: (productId: string, review: Omit<ProductReview, 'id' | 'timestamp' | 'helpful' | 'notHelpful'> & { timestamp?: string; helpful?: number; notHelpful?: number }) => Promise<Product | undefined>;
   deleteProduct: (id: string) => void;
   getProductById: (id: string) => Product | undefined;
   getProductsByFarmer: (farmerId: string) => Product[];
@@ -844,6 +848,17 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, []);
 
+  const addProductReview = useCallback(async (productId: string, review: Omit<ProductReview, 'id' | 'timestamp' | 'helpful' | 'notHelpful'> & { timestamp?: string; helpful?: number; notHelpful?: number }) => {
+    try {
+      const updatedProduct = await api.addProductReview(productId, review);
+      setProducts((prev) => prev.map((p) => (p.id === productId ? normalizeProduct(updatedProduct) : p)));
+      return updatedProduct;
+    } catch (error) {
+      console.error('Failed to add product review', error);
+      return undefined;
+    }
+  }, []);
+
   const deleteProduct = useCallback(async (id: string) => {
     try {
       await api.deleteProductApi(id);
@@ -1284,6 +1299,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     products,
     addProduct,
     updateProduct,
+    addProductReview,
     deleteProduct,
     getProductById,
     getProductsByFarmer,

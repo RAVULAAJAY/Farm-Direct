@@ -5,14 +5,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CheckCircle, CreditCard, Smartphone, Truck, Wallet, AlertCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { CheckCircle, CreditCard, Smartphone, Truck, Wallet, AlertCircle, QrCode } from 'lucide-react';
 import { hasBuyerPaymentDetails, useAuth } from '@/context/AuthContext';
 import { CheckoutPaymentMethod, useGlobalState } from '@/context/GlobalStateContext';
 
 const CheckoutPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { cartItems, products, checkoutCart } = useGlobalState();
+  const { cartItems, products, users, checkoutCart } = useGlobalState();
 
   const [deliveryAddress, setDeliveryAddress] = useState(currentUser?.location ?? '');
   const [contactPhone, setContactPhone] = useState(currentUser?.phone ?? '');
@@ -42,6 +43,24 @@ const CheckoutPage: React.FC = () => {
   );
 
   const subtotal = detailedItems.reduce((sum, entry) => sum + entry.total, 0);
+
+  const upiPaymentDetails = useMemo(
+    () =>
+      detailedItems.map(({ product, quantity, total }) => {
+        const farmerUser = users.find((entry) => entry.id === product.farmerId && entry.role === 'farmer');
+
+        return {
+          product,
+          quantity,
+          total,
+          farmerName: farmerUser?.name ?? product.farmerName,
+          farmerUpi: farmerUser?.paymentDetails?.ifscOrUpi ?? '',
+          qrCodeDataUrl: farmerUser?.paymentDetails?.upiQrCodeDataUrl ?? '',
+          qrCodeFileName: farmerUser?.paymentDetails?.upiQrCodeFileName ?? '',
+        };
+      }),
+    [detailedItems, users]
+  );
 
   const paymentOptions: Array<{ value: CheckoutPaymentMethod; label: string; icon: React.ReactNode }> = [
     { value: 'upi', label: 'UPI', icon: <Smartphone className="h-4 w-4" /> },
@@ -169,6 +188,56 @@ const CheckoutPage: React.FC = () => {
                   {option.label}
                 </Button>
               ))}
+
+              {paymentMethod === 'upi' && (
+                <div className="mt-4 space-y-4 sm:col-span-3">
+                  <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
+                    <QrCode className="h-4 w-4" />
+                    <AlertDescription>
+                      Scan the correct farmer QR code shown for each product below. If your cart has items from multiple farmers, each product displays its own QR.
+                    </AlertDescription>
+                  </Alert>
+
+                  <div className="space-y-4">
+                    {upiPaymentDetails.map(({ product, farmerName, farmerUpi, qrCodeDataUrl, qrCodeFileName, quantity, total }) => (
+                      <div key={product.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-base font-semibold text-gray-900">{product.name}</p>
+                              <Badge variant="secondary">{quantity} {product.unit}</Badge>
+                            </div>
+                            <p className="text-sm text-gray-600">Farmer: {farmerName}</p>
+                            <p className="text-sm text-gray-700">Amount: ₹{total.toFixed(2)}</p>
+                            <p className="text-sm text-gray-700">
+                              UPI ID: {farmerUpi || 'Not added'}
+                            </p>
+                          </div>
+
+                          <div className="flex flex-col items-center gap-2 rounded-lg border bg-gray-50 p-3 lg:min-w-56">
+                            {qrCodeDataUrl ? (
+                              <>
+                                <img
+                                  src={qrCodeDataUrl}
+                                  alt={`${farmerName} UPI QR code for ${product.name}`}
+                                  className="h-48 w-48 rounded-md border bg-white object-contain"
+                                />
+                                <p className="text-center text-xs font-medium text-gray-900">
+                                  {qrCodeFileName || `${farmerName} QR`}
+                                </p>
+                              </>
+                            ) : (
+                              <div className="flex h-48 w-48 items-center justify-center rounded-md border border-dashed bg-white text-center text-sm text-gray-500">
+                                No QR code uploaded for this farmer yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

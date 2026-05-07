@@ -95,7 +95,7 @@ const statusConfig: Record<OrderStatus, { label: string; color: string; icon: Re
 const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { orders, products, updateOrder, updateProduct, addNotification, addMessage } = useGlobalState();
+  const { orders, products, updateOrder, addProductReview, addNotification, addMessage } = useGlobalState();
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showOrderDetail, setShowOrderDetail] = useState(false);
   const [ratingOrder, setRatingOrder] = useState<Order | null>(null);
@@ -288,17 +288,19 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
       return;
     }
 
-    const existingReviews = product.reviews ?? 0;
-    const existingRating = product.rating ?? 0;
-    const nextReviews = existingReviews + 1;
-    const nextRating = (existingRating * existingReviews + ratingValue) / nextReviews;
-
-    updateProduct(product.id, {
-      rating: Number(nextRating.toFixed(2)),
-      reviews: nextReviews,
+    const feedbackText = ratingFeedback.trim();
+    const nextTitle = feedbackText ? 'Buyer feedback' : 'Buyer rating';
+    void addProductReview(product.id, {
+      userId: currentUser.id,
+      userName: currentUser.name,
+      rating: ratingValue,
+      title: nextTitle,
+      content: feedbackText || `Rated ${ratingValue}/5 stars.`,
+      verified: true,
+      purchaseVerified: true,
+      images: [],
     });
 
-    const feedbackText = ratingFeedback.trim();
     if (feedbackText) {
       addMessage({
         id: `message_rating_${Date.now()}`,

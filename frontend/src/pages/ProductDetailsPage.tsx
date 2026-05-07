@@ -103,30 +103,29 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
   const isFavorite = isFavoriteProduct(product.id);
   const listedDate = product.createdAt ?? product.harvestDate;
   const availableStock = product.stock ?? product.quantity;
+  const productReviews = useMemo(
+    () => [...(product.reviewEntries ?? [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+    [product.reviewEntries]
+  );
 
-  const reviews = [
-    {
-      id: 1,
-      author: 'Rajesh Kumar',
-      rating: 5,
-      date: '2 days ago',
-      text: 'Excellent quality and very fresh.',
-    },
-    {
-      id: 2,
-      author: 'Priya Singh',
-      rating: 4,
-      date: '1 week ago',
-      text: 'Good quality and prompt delivery.',
-    },
-    {
-      id: 3,
-      author: 'Amit Patel',
-      rating: 5,
-      date: '2 weeks ago',
-      text: 'Highly recommend this farmer.',
-    },
-  ];
+  const reviewStats = useMemo(() => {
+    if (productReviews.length === 0) {
+      return { average: Number(product.rating ?? 0), count: Number(product.reviews ?? 0) };
+    }
+
+    const sum = productReviews.reduce((total, review) => total + review.rating, 0);
+    return {
+      average: Number((sum / productReviews.length).toFixed(1)),
+      count: productReviews.length,
+    };
+  }, [product.rating, product.reviews, productReviews]);
+
+  const formatReviewDate = (timestamp: string) =>
+    new Date(timestamp).toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
 
   const handleToggleFavorite = () => {
     toggleFavoriteProduct(product.id);
@@ -371,7 +370,7 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="description">Description</TabsTrigger>
           <TabsTrigger value="farmer">Farmer Profile</TabsTrigger>
-          <TabsTrigger value="reviews">Reviews ({reviews.length})</TabsTrigger>
+          <TabsTrigger value="reviews">Reviews ({reviewStats.count})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="description">
@@ -508,32 +507,68 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
               <CardTitle>Customer Reviews</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="rounded-lg bg-gray-50 p-4">
-                <p className="text-4xl font-bold text-gray-900">{resolvedFarmer.rating}</p>
-                <p className="mt-2 text-sm text-gray-600">Based on {resolvedFarmer.reviews} reviews</p>
+              <div className="grid gap-4 rounded-2xl bg-gray-50 p-4 sm:grid-cols-[auto,1fr] sm:items-center">
+                <div>
+                  <p className="text-4xl font-bold text-gray-900">{reviewStats.average.toFixed(1)}</p>
+                  <p className="mt-2 text-sm text-gray-600">Based on {reviewStats.count} review{reviewStats.count === 1 ? '' : 's'}</p>
+                </div>
+                <div className="space-y-1">
+                  {[5, 4, 3, 2, 1].map((rating) => {
+                    const count = productReviews.filter((review) => Math.round(review.rating) === rating).length;
+                    const percentage = reviewStats.count > 0 ? (count / reviewStats.count) * 100 : 0;
+
+                    return (
+                      <div key={rating} className="flex items-center gap-2 text-sm">
+                        <span className="w-10 text-gray-600">{rating}★</span>
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
+                          <div className="h-full rounded-full bg-amber-400" style={{ width: `${percentage}%` }} />
+                        </div>
+                        <span className="w-8 text-right text-gray-600">{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="space-y-4">
-                {reviews.map((review) => (
-                  <div key={review.id} className="border-b border-gray-200 pb-4 last:border-b-0">
-                    <div className="mb-2 flex items-start justify-between">
-                      <div>
-                        <p className="font-semibold text-gray-900">{review.author}</p>
-                        <p className="text-sm text-gray-600">{review.date}</p>
+              {productReviews.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-8 text-center">
+                  <p className="text-sm font-medium text-gray-900">No reviews yet</p>
+                  <p className="mt-1 text-sm text-gray-500">Reviews and comments will appear here after buyers submit feedback.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {productReviews.map((review) => (
+                    <div key={review.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-gray-900">{review.userName}</p>
+                          <p className="text-sm text-gray-600">{review.title}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex gap-0.5 text-amber-500">
+                            {Array.from({ length: 5 }).map((_, index) => (
+                              <Star
+                                key={index}
+                                className={`h-4 w-4 ${index < Math.round(review.rating) ? 'fill-current' : ''}`}
+                              />
+                            ))}
+                          </div>
+                          <span className="text-sm font-semibold text-gray-900">{review.rating.toFixed(1)}</span>
+                        </div>
                       </div>
-                      <div className="flex gap-0.5">
-                        {Array.from({ length: 5 }).map((_, index) => (
-                          <Star
-                            key={index}
-                            className={`h-4 w-4 ${index < review.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`}
-                          />
-                        ))}
+
+                      <p className="mt-3 text-sm leading-7 text-gray-700">{review.content}</p>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span>{formatReviewDate(review.timestamp)}</span>
+                        {review.purchaseVerified && (
+                          <span className="rounded-full bg-blue-50 px-2 py-1 font-medium text-blue-700">Verified purchase</span>
+                        )}
                       </div>
                     </div>
-                    <p className="text-gray-700">{review.text}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
