@@ -13,8 +13,10 @@
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/favicon-v2.png" />
 
-    <link rel="icon" href="/favicon.png" type="image/png" />
-    <link rel="shortcut icon" href="/favicon.png" type="image/png" />
+    <link rel="icon" href="/favicon-v2.png" type="image/png" />
+    <link rel="shortcut icon" href="/favicon-v2.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/favicon-v2.png" />
+    <meta name="theme-color" content="#1e7f2e" />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@farmdirect" />
@@ -22,7 +24,21 @@
   </head>
 
   <body>
+    <!-- Splash/brand shown while app loads -->
+    <div id="splash" aria-hidden="true" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#fff;z-index:9999;transition:opacity .25s ease">
+      <div style="text-align:center">
+        <img src="/favicon-v2.png" alt="FarmDirect" width="72" height="72" style="display:block;margin:0 auto 12px" />
+        <div style="font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; font-weight:700; color:#0f5132; font-size:18px">FarmDirect</div>
+        <div style="color:#6b7280;margin-top:6px">Connecting farmers directly with buyers</div>
+      </div>
+    </div>
     <div id="root"></div>
+    <script>
+      // Keep splash visible until app removes it. Fallback: remove after 5s.
+      window.__farmdirect_splash_timeout = setTimeout(function(){
+        var s = document.getElementById('splash'); if(s) s.style.opacity='0'; setTimeout(function(){ if(s && s.parentNode) s.parentNode.removeChild(s); },300);
+      }, 5000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
