@@ -68,7 +68,7 @@ const CheckoutPage: React.FC = () => {
     { value: 'cod', label: 'Cash on Delivery', icon: <Wallet className="h-4 w-4" /> },
   ];
 
-  const handleConfirmOrder = () => {
+  const handleConfirmOrder = async () => {
     setErrorMessage('');
     setSuccessMessage('');
 
@@ -83,7 +83,7 @@ const CheckoutPage: React.FC = () => {
       return;
     }
 
-    const result = checkoutCart({
+    const result = await checkoutCart({
       deliveryAddress,
       contactPhone,
       paymentMethod,

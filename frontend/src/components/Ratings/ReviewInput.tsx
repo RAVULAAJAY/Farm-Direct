@@ -12,7 +12,7 @@ interface ReviewInputProps {
     title: string;
     content: string;
     images: string[];
-  }) => void;
+  }) => Promise<boolean | void> | boolean | void;
   isLoading?: boolean;
 }
 
@@ -72,21 +72,24 @@ const ReviewInput: React.FC<ReviewInputProps> = ({
     setImages(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!validateForm()) {
       return;
     }
 
-    onSubmit({
+    const submitted = await onSubmit({
       rating,
       title: title.trim(),
       content: content.trim(),
       images
     });
 
-    // Reset form
+    if (submitted === false) {
+      return;
+    }
+
     setRating(0);
     setTitle('');
     setContent('');

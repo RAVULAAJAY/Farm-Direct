@@ -261,7 +261,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
     event.target.value = '';
   };
 
-  const handlePaymentSave = () => {
+  const handlePaymentSave = async () => {
     const bankName = paymentFormData.bankName.trim();
     const accountNumber = paymentFormData.accountNumber.trim();
     const ifscOrUpi = paymentFormData.ifscOrUpi.trim();
@@ -271,20 +271,24 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
       return;
     }
 
-    updateUser(user.id, {
-      paymentDetails: {
-        bankName,
-        accountNumber,
-        ifscOrUpi,
-        upiQrCodeDataUrl: paymentFormData.upiQrCodeDataUrl || undefined,
-        upiQrCodeFileName: paymentFormData.upiQrCodeFileName || undefined,
-      },
-    });
+    try {
+      await updateUser(user.id, {
+        paymentDetails: {
+          bankName,
+          accountNumber,
+          ifscOrUpi,
+          upiQrCodeDataUrl: paymentFormData.upiQrCodeDataUrl || undefined,
+          upiQrCodeFileName: paymentFormData.upiQrCodeFileName || undefined,
+        },
+      });
 
-    setPaymentError('');
-    setPaymentSaveStatus('saved');
-    setIsPaymentEditing(false);
-    window.setTimeout(() => setPaymentSaveStatus('idle'), 2000);
+      setPaymentError('');
+      setPaymentSaveStatus('saved');
+      setIsPaymentEditing(false);
+      window.setTimeout(() => setPaymentSaveStatus('idle'), 2000);
+    } catch {
+      setPaymentError('Unable to save payment info right now. Please try again.');
+    }
   };
 
   const roleStyle = getRoleClassName(user.role);
@@ -648,6 +652,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
 
             {!isPaymentEditing ? (
               <Button
+                  type="button"
                 className="w-full bg-green-600 hover:bg-green-700"
                 onClick={() => {
                   setIsPaymentEditing(true);
@@ -658,10 +663,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, requireCompletion = fal
               </Button>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Button className="bg-green-600 hover:bg-green-700" onClick={handlePaymentSave}>
+                <Button type="button" className="bg-green-600 hover:bg-green-700" onClick={handlePaymentSave}>
                   Update Payment Info
                 </Button>
-                <Button variant="outline" onClick={handlePaymentCancel}>
+                <Button type="button" variant="outline" onClick={handlePaymentCancel}>
                   Cancel
                 </Button>
               </div>

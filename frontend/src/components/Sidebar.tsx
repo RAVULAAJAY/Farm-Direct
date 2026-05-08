@@ -74,7 +74,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     { icon: BarChart3, label: 'Buyer Dashboard', path: '/buyer/dashboard', show: isBuyer },
     { icon: ShoppingCart, label: 'Browse Listings', path: '/browse', show: isBuyer },
     { icon: ShoppingCart, label: 'My Cart', path: '/cart', show: isBuyer },
-    { icon: Wallet, label: 'Checkout', path: '/checkout', show: isBuyer },
     { icon: Heart, label: 'Saved Items', path: '/favorites', show: isBuyer },
     { icon: BarChart3, label: 'My Orders', path: '/orders', show: isBuyer },
     { icon: Users, label: 'Users', path: '/admin/dashboard?tab=users', show: isAdmin },

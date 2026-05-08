@@ -105,15 +105,16 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
 
   const isFarmer = user.role === 'farmer';
   const isBuyer = user.role === 'buyer';
+  const activeUserId = currentUser?.id ?? user.id;
 
   const buyerOrders = useMemo(
-    () => orders.filter((order) => order.buyerId === currentUser?.id),
-    [orders, currentUser?.id]
+    () => orders.filter((order) => order.buyerId === activeUserId),
+    [activeUserId, orders]
   );
 
   const farmerOrders = useMemo(
-    () => orders.filter((order) => order.farmerId === currentUser?.id),
-    [orders, currentUser?.id]
+    () => orders.filter((order) => order.farmerId === activeUserId),
+    [activeUserId, orders]
   );
 
   const visibleOrders = isFarmer ? farmerOrders : buyerOrders;

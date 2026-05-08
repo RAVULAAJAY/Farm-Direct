@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +25,8 @@ import {
 import { Product } from '@/lib/data';
 import { useGlobalState } from '@/context/GlobalStateContext';
 import { useNavigate } from 'react-router-dom';
+import ReviewInput from '@/components/Ratings/ReviewInput';
+import { useToast } from '@/hooks/use-toast';
 
 interface Farmer {
   id: string;
@@ -79,7 +81,9 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
     addToCart,
     isFavoriteProduct,
     toggleFavoriteProduct,
+    addProductReview,
   } = useGlobalState();
+  const { toast } = useToast();
 
   const [quantity, setQuantity] = useState(1);
   const [showContactDialog, setShowContactDialog] = useState(false);
@@ -160,6 +164,43 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
 
     navigate(`/messages?${query.toString()}`);
   };
+
+  const handleReviewSubmit = useCallback(async (reviewData: {
+    rating: number;
+    title: string;
+    content: string;
+    images: string[];
+  }) => {
+    if (!currentUser || currentUser.role !== 'buyer') {
+      return false;
+    }
+
+    const updatedProduct = await addProductReview(product.id, {
+      userId: currentUser.id,
+      userName: currentUser.name,
+      rating: reviewData.rating,
+      title: reviewData.title,
+      content: reviewData.content,
+      verified: true,
+      images: reviewData.images,
+      purchaseVerified: true,
+    });
+
+    if (updatedProduct) {
+      toast({
+        title: 'Review saved',
+        description: 'Your rating and comment are now visible on the product page.',
+      });
+      return true;
+    }
+
+    toast({
+      title: 'Review not saved',
+      description: 'Please try again in a moment.',
+      variant: 'destructive',
+    });
+    return false;
+  }, [addProductReview, currentUser, product.id, toast]);
 
   return (
     <div className="space-y-8 pb-8">
@@ -507,6 +548,10 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
               <CardTitle>Customer Reviews</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
+              {currentUser?.role === 'buyer' && (
+                <ReviewInput onSubmit={handleReviewSubmit} />
+              )}
+
               <div className="grid gap-4 rounded-2xl bg-gray-50 p-4 sm:grid-cols-[auto,1fr] sm:items-center">
                 <div>
                   <p className="text-4xl font-bold text-gray-900">{reviewStats.average.toFixed(1)}</p>

@@ -14,6 +14,7 @@ import {
   ValidationError,
 } from '@/lib/validation';
 import { getAdminLoginEmail, hasAdminLoginCredentials, isAdminCredentialMatch } from '@/lib/adminAuth';
+import { fetchUsers } from '@/lib/api';
 import { UserRole, type User } from '@/context/AuthContext';
 import { useGlobalState } from '@/context/GlobalStateContext';
 import BrandLogo from '@/components/BrandLogo';
@@ -546,9 +547,21 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
       await new Promise((resolve) => setTimeout(resolve, 600));
 
       const normalizedEmail = formData.email.trim().toLowerCase();
-      const existingUser = users.find(
+      let existingUser = users.find(
         (entry) => entry.email.trim().toLowerCase() === normalizedEmail && entry.role === role
       );
+
+      // Fallback to backend lookup when local users state is still hydrating.
+      if (submitMode === 'login' && !existingUser) {
+        try {
+          const remoteUsers = await fetchUsers();
+          existingUser = remoteUsers.find(
+            (entry) => entry.email.trim().toLowerCase() === normalizedEmail && entry.role === role
+          );
+        } catch {
+          // Keep existing behavior below when remote lookup is unavailable.
+        }
+      }
 
       if (submitMode === 'login' && !existingUser) {
         setGeneralError('No account found for this role. Please sign up first.');
@@ -639,7 +652,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
               createdAt: existingUser?.createdAt ?? new Date().toISOString(),
             };
 
-      upsertUser(user);
+      await upsertUser(user);
       onSuccess(user);
     } catch {
       setGeneralError('An error occurred while submitting the form. Please try again.');

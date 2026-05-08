@@ -179,6 +179,8 @@ const FarmerManagementPanel: React.FC = () => {
       return;
     }
 
+    setPaymentErrorMessage('');
+
     const payload = buildProductPayload(formProduct, editingProduct ?? undefined);
     const wasEditing = Boolean(editingProduct);
 
@@ -192,7 +194,8 @@ const FarmerManagementPanel: React.FC = () => {
       }
     } catch (error) {
       console.error('Product save failed', error);
-      showSuccess('Failed to save product, please try again.');
+      setPaymentErrorMessage('Failed to save product. Please try again.');
+      return;
     }
 
     closeProductDialog();

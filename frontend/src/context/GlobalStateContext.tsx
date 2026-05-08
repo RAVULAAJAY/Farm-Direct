@@ -135,6 +135,38 @@ const normalizeProduct = (product: Product): Product => {
   };
 };
 
+const sanitizeUserForStorage = (user: User): User => ({
+  ...user,
+  paymentDetails: user.paymentDetails
+    ? {
+        bankName: user.paymentDetails.bankName,
+        accountNumber: user.paymentDetails.accountNumber,
+        ifscOrUpi: user.paymentDetails.ifscOrUpi,
+      }
+    : user.paymentDetails,
+  farmerOnboarding: user.farmerOnboarding
+    ? {
+        ...user.farmerOnboarding,
+        idProofDataUrl: undefined,
+      }
+    : user.farmerOnboarding,
+  buyerOnboarding: user.buyerOnboarding
+    ? {
+        ...user.buyerOnboarding,
+        idProofDataUrl: undefined,
+      }
+    : user.buyerOnboarding,
+  profilePhoto: user.profilePhoto,
+});
+
+const safeSetLocalStorageItem = (key: string, value: unknown) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Failed to persist ${key} to localStorage`, error);
+  }
+};
+
 export interface Message {
   id: string;
   senderId: string;
@@ -237,8 +269,8 @@ export interface GlobalStateContextType {
   updateCartItemQuantity: (productId: string, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
-  checkoutCart: (checkout: CheckoutInput) => { success: boolean; createdOrderIds: string[]; message: string };
-  placeOrder: (product: Product, quantity: number, deliveryInput?: OrderDeliveryInput) => void;
+  checkoutCart: (checkout: CheckoutInput) => Promise<{ success: boolean; createdOrderIds: string[]; message: string }>;
+  placeOrder: (product: Product, quantity: number, deliveryInput?: OrderDeliveryInput) => Promise<Order | undefined>;
 
   // Orders
   orders: Order[];
@@ -317,8 +349,12 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>([]);
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>(() => {
+    return readStoredValue<string[]>('favoriteProductIds') ?? [];
+  });
+  const [cartItems, setCartItems] = useState<CartItem[]>(() => {
+    return readStoredValue<CartItem[]>('cartItems') ?? [];
+  });
 
   useEffect(() => {
     const loadData = async () => {
@@ -532,10 +568,11 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     setCurrentUserState(user);
 
     if (user) {
-      localStorage.setItem('currentUser', JSON.stringify(user));
-      localStorage.setItem(`user_${user.id}`, JSON.stringify(user));
+      const storedUser = sanitizeUserForStorage(user);
+      safeSetLocalStorageItem('currentUser', storedUser);
+      safeSetLocalStorageItem(`user_${user.id}`, storedUser);
       setSelectedRoleState(user.role);
-      localStorage.setItem('selectedRole', JSON.stringify(user.role));
+      safeSetLocalStorageItem('selectedRole', user.role);
       return;
     }
 
@@ -628,6 +665,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       }
     } catch (error) {
       console.error('Failed to upsert user', error);
+      throw error;
     }
   }, [addActivityLog, notifyAdmins, users]);
 
@@ -645,7 +683,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       loginCount: (user.loginCount ?? 0) + 1,
     };
 
-    upsertUser(nextUser);
+    void upsertUser(nextUser).catch((error) => {
+      console.error('Failed to sync login user', error);
+    });
     setCurrentUser(nextUser);
 
     addActivityLog({
@@ -671,7 +711,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       createdAt: new Date().toISOString(),
     };
 
-    upsertUser(userWithTimestamp);
+    void upsertUser(userWithTimestamp).catch((error) => {
+      console.error('Failed to sync signup user', error);
+    });
     setCurrentUser(userWithTimestamp);
   }, [setCurrentUser, upsertUser]);
 
@@ -695,26 +737,43 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     localStorage.setItem('cartItems', JSON.stringify([]));
   }, [addActivityLog, currentUser]);
 
-  const updateUser = useCallback((userId: string, updates: Partial<User>) => {
-    setUsers((prev) => {
-      const updated = prev.map((user) =>
-        user.id === userId ? { ...user, ...updates } : user
-      );
-      localStorage.setItem('users', JSON.stringify(updated));
-      return updated;
-    });
+  const updateUser = useCallback(async (userId: string, updates: Partial<User>) => {
+    try {
+      const currentRecord = users.find((user) => user.id === userId);
+      const mergedRecord: User = currentRecord ? { ...currentRecord, ...updates } : ({ id: userId, ...updates } as User);
 
-    setCurrentUserState((prev) => {
-      if (!prev || prev.id !== userId) {
-        return prev;
-      }
+      const savedUser = await api.updateUser(userId, mergedRecord);
+      const normalizedUser = { ...mergedRecord, ...savedUser };
 
-      const nextUser = { ...prev, ...updates };
-      localStorage.setItem('currentUser', JSON.stringify(nextUser));
-      localStorage.setItem(`user_${userId}`, JSON.stringify(nextUser));
-      return nextUser;
-    });
-  }, []);
+      setUsers((prev) => {
+        const updated = prev.map((user) =>
+          user.id === userId ? normalizedUser : user
+        );
+        if (!updated.some((user) => user.id === userId)) {
+          updated.unshift(normalizedUser);
+        }
+        safeSetLocalStorageItem('users', updated.map(sanitizeUserForStorage));
+        return updated;
+      });
+
+      setCurrentUserState((prev) => {
+        if (!prev || prev.id !== userId) {
+          return prev;
+        }
+
+        const nextUser = { ...prev, ...normalizedUser };
+        const storedUser = sanitizeUserForStorage(nextUser);
+        safeSetLocalStorageItem('currentUser', storedUser);
+        safeSetLocalStorageItem(`user_${userId}`, storedUser);
+        return nextUser;
+      });
+
+      return normalizedUser;
+    } catch (error) {
+      console.error('Failed to update user', error);
+      throw error;
+    }
+  }, [users]);
 
   const removeUserFromState = useCallback((userId: string) => {
     setUsers((prev) => {
@@ -834,8 +893,10 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         '/admin/dashboard?tab=products',
         'notification_new_product'
       );
+      return created;
     } catch (error) {
       console.error('Failed to add product', error);
+      throw error;
     }
   }, [addActivityLog, notifyAdmins]);
 
@@ -940,9 +1001,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   }, []);
 
   const placeOrder = useCallback(
-    (product: Product, quantity: number, deliveryInput?: OrderDeliveryInput) => {
+    async (product: Product, quantity: number, deliveryInput?: OrderDeliveryInput) => {
       if (!currentUser) {
-        return;
+        return undefined;
       }
 
       const productInState = products.find((item) => item.id === product.id);
@@ -976,6 +1037,14 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         farmerName: productInState.farmerName,
       };
 
+      let savedOrder: Order;
+      try {
+        savedOrder = normalizeOrder(await api.createOrder(order));
+      } catch (error) {
+        console.error('Failed to persist order', error);
+        return undefined;
+      }
+
       setProducts((prev) => {
         const updated = prev.map((item) => {
           if (item.id !== productInState.id) {
@@ -998,7 +1067,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       });
 
       setOrders((prev) => {
-        const updated = [...prev, order];
+        const updated = [...prev, savedOrder];
         localStorage.setItem('orders', JSON.stringify(updated));
         return updated;
       });
@@ -1030,12 +1099,14 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       if (currentUser.id !== productInState.farmerId) {
         addNotification(buyerNotification);
       }
+
+      return savedOrder;
     },
     [addNotification, currentUser, products]
   );
 
   const checkoutCart = useCallback(
-    (checkout: CheckoutInput) => {
+    async (checkout: CheckoutInput) => {
       if (!currentUser) {
         return { success: false, createdOrderIds: [], message: 'Please log in to checkout.' };
       }
@@ -1053,18 +1124,29 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       }
 
       const createdOrderIds: string[] = [];
-      cartItems.forEach((item) => {
-        const product = products.find((entry) => entry.id === item.productId);
-        if (!product) {
-          return;
-        }
+      try {
+        for (const item of cartItems) {
+          const product = products.find((entry) => entry.id === item.productId);
+          if (!product) {
+            continue;
+          }
 
-        placeOrder(product, item.quantity, {
-          option: 'delivery',
-          deliveryAddress: checkout.deliveryAddress.trim(),
-        });
-        createdOrderIds.push(product.id);
-      });
+          const savedOrder = await placeOrder(product, item.quantity, {
+            option: 'delivery',
+            deliveryAddress: checkout.deliveryAddress.trim(),
+          });
+          if (savedOrder) {
+            createdOrderIds.push(savedOrder.id);
+          }
+        }
+      } catch (error) {
+        console.error('Checkout failed', error);
+        return {
+          success: false,
+          createdOrderIds: [],
+          message: 'Unable to place order right now. Please try again.',
+        };
+      }
 
       clearCart();
 
