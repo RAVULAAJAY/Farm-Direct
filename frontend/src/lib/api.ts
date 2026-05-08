@@ -33,6 +33,11 @@ export const fetchOrders = () => request<Order[]>('/orders');
 export const createOrder = (order: Omit<Order, 'id' | 'orderDate' | 'status' | 'deliveryStatus'>) => request<Order>('/orders', { method: 'POST', body: JSON.stringify(order) });
 export const updateOrderApi = (id: string, updates: Partial<Order>) => request<Order>(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
+// Auth endpoints
+export const loginUser = (email: string, password: string) => request<Record<string, any>>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+export const requestPasswordReset = (email: string) => request<Record<string, any>>('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) });
+export const resetPassword = (email: string, token: string, password: string) => request<Record<string, any>>('/auth/reset', { method: 'POST', body: JSON.stringify({ email, token, password }) });
+
 export interface ActivityLogItem {
   id: string;
   userId: string;

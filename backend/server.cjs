@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -57,19 +58,49 @@ app.use(express.json({ limit: '10mb' }));
 
 app.get('/api/users', (req, res) => res.json(users));
 app.post('/api/users', (req, res) => {
-  const user = { id: uuidv4(), ...req.body, isActive: true, joinedDate: new Date().toISOString() };
+  // Handle password hashing if provided
+  const incoming = { ...req.body };
+  const plainPassword = typeof incoming.password === 'string' ? incoming.password : undefined;
+  delete incoming.password;
+
+  const user = { id: uuidv4(), ...incoming, isActive: true, joinedDate: new Date().toISOString() };
+
+  if (plainPassword) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = crypto.scryptSync(plainPassword, salt, 64).toString('hex');
+    user.passwordSalt = salt;
+    user.passwordHash = derived;
+  }
+
   users.push(user);
   saveData(USERS_FILE, users);
   activityLogs.unshift({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'registered account', timestamp: new Date().toISOString() });
   saveData(ACTIVITY_FILE, activityLogs);
-  res.status(201).json(user);
+  // Never return passwordHash/salt in responses
+  const safe = { ...user };
+  delete safe.passwordHash;
+  delete safe.passwordSalt;
+  res.status(201).json(safe);
 });
 app.put('/api/users/:id', (req, res) => {
   const idx = users.findIndex((u) => u.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'User not found' });
-  users[idx] = { ...users[idx], ...req.body };
+  // Allow password change via PUT (hash securely)
+  const updates = { ...req.body };
+  if (typeof updates.password === 'string' && updates.password.length > 0) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = crypto.scryptSync(updates.password, salt, 64).toString('hex');
+    updates.passwordSalt = salt;
+    updates.passwordHash = derived;
+    delete updates.password;
+  }
+
+  users[idx] = { ...users[idx], ...updates };
   saveData(USERS_FILE, users);
-  res.json(users[idx]);
+  const safe = { ...users[idx] };
+  delete safe.passwordHash;
+  delete safe.passwordSalt;
+  res.json(safe);
 });
 
 app.get('/api/products', (req, res) => res.json(products));
@@ -144,6 +175,145 @@ app.post('/api/orders', (req, res) => {
   activityLogs.unshift({ id: uuidv4(), userId: order.buyerId, userName: order.buyerName, userRole: 'buyer', action: 'placed order', targetId: order.id, targetType: 'order', timestamp: new Date().toISOString() });
   saveData(ACTIVITY_FILE, activityLogs);
   res.status(201).json(order);
+});
+
+// Auth: login
+app.post('/api/auth/login', (req, res) => {
+  const email = (req.body?.email || '').trim().toLowerCase();
+  const password = req.body?.password || '';
+  const user = users.find((u) => (u.email || '').trim().toLowerCase() === email);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  if (!user.passwordHash || !user.passwordSalt) {
+    return res.status(401).json({ error: 'No password set for this account' });
+  }
+
+  try {
+    const derived = crypto.scryptSync(password, user.passwordSalt, 64).toString('hex');
+    if (derived !== user.passwordHash) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Unable to verify credentials' });
+  }
+
+  // Successful login - return sanitized user
+  const safe = { ...user };
+  delete safe.passwordHash;
+  delete safe.passwordSalt;
+  delete safe.resetPasswordHash;
+  delete safe.resetPasswordExpiry;
+
+  activityLogs.unshift({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'logged in', targetType: 'auth', timestamp: new Date().toISOString() });
+  saveData(ACTIVITY_FILE, activityLogs);
+
+  res.json(safe);
+});
+
+// Auth: request password reset
+app.post('/api/auth/forgot', async (req, res) => {
+  const email = (req.body?.email || '').trim().toLowerCase();
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  const user = users.find((u) => (u.email || '').trim().toLowerCase() === email);
+
+  // Always respond success to avoid user enumeration
+  if (!user) {
+    return res.json({ success: true });
+  }
+
+  // Generate token and store its hash
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  user.resetPasswordHash = tokenHash;
+  user.resetPasswordExpiry = Date.now() + (60 * 60 * 1000); // 1 hour
+  saveData(USERS_FILE, users);
+
+  const frontendBase = process.env.FRONTEND_BASE || 'http://localhost:8080';
+  const resetLink = `${frontendBase.replace(/\/$/, '')}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
+
+  // Try to send email via nodemailer if configured, otherwise log
+  let emailed = false;
+  try {
+    const smtpHost = process.env.SMTP_HOST;
+    if (smtpHost) {
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: (process.env.SMTP_SECURE || 'false') === 'true',
+        auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      });
+
+      const mailOptions = {
+        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        to: email,
+        subject: 'Password reset request',
+        text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
+        html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
+      };
+
+      await transporter.sendMail(mailOptions);
+      emailed = true;
+    }
+  } catch (e) {
+    console.warn('Failed to send reset email via SMTP, falling back to console log', e && e.message ? e.message : e);
+  }
+
+  if (!emailed) {
+    console.log(`Password reset link for ${email}: ${resetLink}`);
+  }
+
+  // In debug mode optionally return reset link (do not enable in production)
+  if ((process.env.DEBUG_PASSWORD_RESET || '').toLowerCase() === 'true') {
+    return res.json({ success: true, debugLink: resetLink });
+  }
+
+  res.json({ success: true });
+});
+
+// Auth: reset password using token
+app.post('/api/auth/reset', (req, res) => {
+  const { email, token, password } = req.body || {};
+  if (!email || !token || !password) {
+    return res.status(400).json({ error: 'Email, token and new password are required' });
+  }
+
+  const user = users.find((u) => (u.email || '').trim().toLowerCase() === String(email).trim().toLowerCase());
+  if (!user || !user.resetPasswordHash || !user.resetPasswordExpiry) {
+    return res.status(400).json({ error: 'Invalid or expired token' });
+  }
+
+  if (Date.now() > Number(user.resetPasswordExpiry)) {
+    return res.status(400).json({ error: 'Token has expired' });
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
+  if (tokenHash !== user.resetPasswordHash) {
+    return res.status(400).json({ error: 'Invalid token' });
+  }
+
+  // Set new password
+  try {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = crypto.scryptSync(String(password), salt, 64).toString('hex');
+    user.passwordSalt = salt;
+    user.passwordHash = derived;
+    delete user.resetPasswordHash;
+    delete user.resetPasswordExpiry;
+    saveData(USERS_FILE, users);
+
+    activityLogs.unshift({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'reset password', targetType: 'auth', timestamp: new Date().toISOString() });
+    saveData(ACTIVITY_FILE, activityLogs);
+
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ error: 'Unable to set new password' });
+  }
 });
 
 // Update an order (partial updates allowed)

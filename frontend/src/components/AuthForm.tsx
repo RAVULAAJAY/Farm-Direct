@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -65,6 +66,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
     localStorage.setItem('currentUser', JSON.stringify(user));
     onSuccess(user);
   };
+
+  const navigate = useNavigate();
 
   const roleEmoji = role === 'farmer' ? '🧑‍🌾' : role === 'buyer' ? '🧑‍💼' : '🔐';
   const roleColor = role === 'farmer' ? 'green' : role === 'buyer' ? 'blue' : 'purple';
@@ -132,6 +135,11 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
                 required
                 placeholder="Enter your password"
               />
+              {effectiveMode === 'login' && role !== 'admin' && (
+                <div className="text-right mt-2">
+                  <Button variant="link" onClick={() => navigate('/forgot-password')} className="p-0 text-sm">Forgot password?</Button>
+                </div>
+              )}
             </div>
             
             {effectiveMode === 'signup' && (

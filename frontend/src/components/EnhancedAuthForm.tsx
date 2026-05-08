@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -67,6 +68,7 @@ const passwordBarColor: Record<'red' | 'yellow' | 'green', string> = {
 };
 
 const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSuccess, onBack, onModeChange }) => {
+  const navigate = useNavigate();
   const { users, upsertUser } = useGlobalState();
   const [formData, setFormData] = useState({
     name: '',
@@ -563,6 +565,19 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
         }
       }
 
+      // If we're logging in and found a matching user, try server-side login first
+      if (submitMode === 'login' && existingUser) {
+        try {
+          const api = await import('@/lib/api');
+          const remoteUser = await api.loginUser(normalizedEmail, formData.password);
+          onSuccess(remoteUser as User);
+          setIsSubmitting(false);
+          return;
+        } catch (err) {
+          // server login failed - fall back to local behavior below
+        }
+      }
+
       if (submitMode === 'login' && !existingUser) {
         setGeneralError('No account found for this role. Please sign up first.');
         setIsSubmitting(false);
@@ -799,6 +814,13 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                     )}
                   </div>
                 )}
+                  {effectiveMode === 'login' && (
+                    <div className="text-right">
+                      <Button variant="link" onClick={() => navigate('/forgot-password')} className="p-0 text-sm">
+                        Forgot password?
+                      </Button>
+                    </div>
+                  )}
               </div>
 
               {effectiveMode === 'signup' && passwordStrength && (
