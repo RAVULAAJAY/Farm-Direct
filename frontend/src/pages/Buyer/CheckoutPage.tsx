@@ -9,17 +9,25 @@ import { Badge } from '@/components/ui/badge';
 import { CheckCircle, CreditCard, Smartphone, Truck, Wallet, AlertCircle, QrCode } from 'lucide-react';
 import { hasBuyerPaymentDetails, useAuth } from '@/context/AuthContext';
 import { CheckoutPaymentMethod, useGlobalState } from '@/context/GlobalStateContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 const CheckoutPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { cartItems, products, users, checkoutCart } = useGlobalState();
+  const { cartItems, products, users, checkoutCart, updateOrder } = useGlobalState();
 
   const [deliveryAddress, setDeliveryAddress] = useState(currentUser?.location ?? '');
   const [contactPhone, setContactPhone] = useState(currentUser?.phone ?? '');
+  const [recipientName, setRecipientName] = useState(currentUser?.name ?? '');
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('upi');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
+  const [cardError, setCardError] = useState('');
+  const [processingPayment, setProcessingPayment] = useState(false);
+  const [codConfirmOpen, setCodConfirmOpen] = useState(false);
 
   const detailedItems = useMemo(
     () =>
@@ -77,15 +85,81 @@ const CheckoutPage: React.FC = () => {
       return;
     }
 
-    if (!hasBuyerPaymentDetails(currentUser)) {
+    if (paymentMethod !== 'cod' && !hasBuyerPaymentDetails(currentUser)) {
       const next = encodeURIComponent('/checkout');
       navigate(`/buyer/add-payment?warning=payment-required&next=${next}`);
       return;
     }
 
+    // COD: open confirmation modal first
+    if (paymentMethod === 'cod') {
+      setCodConfirmOpen(true);
+      return;
+    }
+
+    // Card: validate inputs and process mock payment
+    if (paymentMethod === 'card') {
+      setCardError('');
+      // simple validation
+      const num = cardNumber.replace(/\s+/g, '');
+      if (!/^\d{12,19}$/.test(num) || !luhnCheck(num)) {
+        setCardError('Please enter a valid card number.');
+        return;
+      }
+      if (!/^(0[1-9]|1[0-2])\/(\d{2}|\d{4})$/.test(cardExpiry)) {
+        setCardError('Expiry must be in MM/YY or MM/YYYY format.');
+        return;
+      }
+      if (!/^\d{3,4}$/.test(cardCvv)) {
+        setCardError('Invalid CVV.');
+        return;
+      }
+
+      // mock process
+      setProcessingPayment(true);
+      try {
+        const txnId = await mockProcessCardPayment({ cardNumber: num, expiry: cardExpiry, cvv: cardCvv, amount: subtotal });
+
+        const result = await checkoutCart({
+          deliveryAddress,
+          contactPhone,
+          recipientName,
+          paymentMethod,
+        });
+
+        if (!result.success) {
+          setErrorMessage(result.message);
+          setProcessingPayment(false);
+          return;
+        }
+
+        // Persist paid amount/reference per created order (map by cart items order)
+        try {
+          for (let i = 0; i < result.createdOrderIds.length; i++) {
+            const orderId = result.createdOrderIds[i];
+            const productTotal = detailedItems[i]?.total ?? 0;
+            await updateOrder(orderId, { paidAmount: productTotal, paymentReference: txnId, paymentMethod: 'card' });
+          }
+        } catch (err) {
+          console.error('Failed to persist card payment info', err);
+        }
+
+        setSuccessMessage('Payment successful. Order placed — redirecting...');
+        window.setTimeout(() => navigate('/orders'), 1400);
+      } catch (err) {
+        setErrorMessage(String(err) || 'Payment failed');
+      } finally {
+        setProcessingPayment(false);
+      }
+
+      return;
+    }
+
+    // Default (UPI or other): just checkout
     const result = await checkoutCart({
       deliveryAddress,
       contactPhone,
+      recipientName,
       paymentMethod,
     });
 
@@ -96,6 +170,31 @@ const CheckoutPage: React.FC = () => {
 
     setSuccessMessage('Order confirmed successfully. Redirecting to your orders...');
     window.setTimeout(() => navigate('/orders'), 1400);
+  };
+
+  // Simple Luhn check for card numbers
+  const luhnCheck = (num: string) => {
+    let sum = 0;
+    let alt = false;
+    for (let i = num.length - 1; i >= 0; i--) {
+      let n = parseInt(num.charAt(i), 10);
+      if (alt) {
+        n *= 2;
+        if (n > 9) n -= 9;
+      }
+      sum += n;
+      alt = !alt;
+    }
+    return sum % 10 === 0;
+  };
+
+  const mockProcessCardPayment = async ({ cardNumber, expiry, cvv, amount }: { cardNumber: string; expiry: string; cvv: string; amount: number }) => {
+    // Simulate network delay and random success
+    await new Promise((r) => setTimeout(r, 900));
+    if (Math.random() < 0.95) {
+      return `TXN_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    }
+    throw new Error('Card was declined');
   };
 
   if (detailedItems.length === 0) {
@@ -159,6 +258,17 @@ const CheckoutPage: React.FC = () => {
               </div>
 
               <div>
+                <Label htmlFor="recipient-name">Name</Label>
+                <Input
+                  id="recipient-name"
+                  value={recipientName}
+                  onChange={(event) => setRecipientName(event.target.value)}
+                  placeholder="Recipient name"
+                  className="mt-2"
+                />
+              </div>
+
+              <div>
                 <Label htmlFor="contact-phone">Contact Phone</Label>
                 <Input
                   id="contact-phone"
@@ -188,6 +298,39 @@ const CheckoutPage: React.FC = () => {
                   {option.label}
                 </Button>
               ))}
+
+              {paymentMethod === 'card' && (
+                <div className="mt-4 space-y-4 sm:col-span-3">
+                  <Alert className="border-amber-200 bg-amber-50 text-amber-800">
+                    <AlertDescription>
+                      Enter card details to pay securely. This demo uses a mock processor — no real charge is made.
+                    </AlertDescription>
+                  </Alert>
+
+                  <div className="grid gap-3">
+                    <div>
+                      <Label>Card Number</Label>
+                      <Input value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} placeholder="1234 5678 9012 3456" className="mt-2" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label>Expiry (MM/YY)</Label>
+                        <Input value={cardExpiry} onChange={(e) => setCardExpiry(e.target.value)} placeholder="MM/YY" className="mt-2" />
+                      </div>
+                      <div>
+                        <Label>CVV</Label>
+                        <Input value={cardCvv} onChange={(e) => setCardCvv(e.target.value)} placeholder="123" className="mt-2" />
+                      </div>
+                    </div>
+                    {cardError && (
+                      <Alert className="border-red-200 bg-red-50 text-red-800">
+                        <AlertDescription>{cardError}</AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="text-sm text-gray-600">Total to be charged: ₹{subtotal.toFixed(2)}</div>
+                  </div>
+                </div>
+              )}
 
               {paymentMethod === 'upi' && (
                 <div className="mt-4 space-y-4 sm:col-span-3">
@@ -238,6 +381,15 @@ const CheckoutPage: React.FC = () => {
                   </div>
                 </div>
               )}
+              {paymentMethod === 'cod' && (
+                <div className="mt-4 sm:col-span-3">
+                  <Alert className="border-blue-200 bg-blue-50 text-blue-800">
+                    <AlertDescription>
+                      Cash on Delivery selected — please confirm delivery address and phone before placing the order.
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -267,15 +419,54 @@ const CheckoutPage: React.FC = () => {
                 <AlertDescription>Secure checkout is enabled. Your order confirmation will appear immediately after payment authorization.</AlertDescription>
               </Alert>
 
-              <Button className="w-full bg-green-600 hover:bg-green-700" onClick={handleConfirmOrder}>
-                Confirm Order
+              <Button disabled={processingPayment} className="w-full bg-green-600 hover:bg-green-700" onClick={handleConfirmOrder}>
+                {processingPayment ? 'Processing...' : 'Confirm Order'}
               </Button>
             </CardContent>
           </Card>
         </div>
       </div>
-    </div>
-  );
+      <Dialog open={codConfirmOpen} onOpenChange={(open) => setCodConfirmOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Cash on Delivery</DialogTitle>
+            <DialogDescription>Verify delivery address and contact phone before placing a COD order.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label className="mb-1">Delivery Address</Label>
+              <div className="rounded-md border p-3 bg-gray-50 text-sm">{deliveryAddress}</div>
+            </div>
+            <div>
+              <Label className="mb-1">Name</Label>
+              <div className="rounded-md border p-3 bg-gray-50 text-sm">{recipientName}</div>
+            </div>
+            <div>
+              <Label className="mb-1">Contact Phone</Label>
+              <div className="rounded-md border p-3 bg-gray-50 text-sm">{contactPhone}</div>
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={async () => {
+                setCodConfirmOpen(false);
+                setErrorMessage('');
+                const result = await checkoutCart({ deliveryAddress, contactPhone, recipientName, paymentMethod: 'cod' });
+                if (!result.success) {
+                  setErrorMessage(result.message);
+                  return;
+                }
+                setSuccessMessage('Order placed with Cash on Delivery. Redirecting to orders...');
+                window.setTimeout(() => navigate('/orders'), 1400);
+              }}>
+                Confirm & Place Order
+              </Button>
+              <Button variant="outline" className="flex-1" onClick={() => setCodConfirmOpen(false)}>Cancel</Button>
+            </div>
+          </div>
+        </DialogContent>
+        </Dialog>
+        </div>
+      );
 };
 
 export default CheckoutPage;

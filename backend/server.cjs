@@ -146,6 +146,37 @@ app.post('/api/orders', (req, res) => {
   res.status(201).json(order);
 });
 
+// Update an order (partial updates allowed)
+app.put('/api/orders/:id', (req, res) => {
+  const idx = orders.findIndex((o) => o.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'Order not found' });
+
+  // Merge updates
+  orders[idx] = { ...orders[idx], ...req.body };
+  saveData(ORDERS_FILE, orders);
+
+  // Log activity (best-effort)
+  try {
+    const existing = orders[idx];
+    activityLogs.unshift({
+      id: uuidv4(),
+      userId: req.body.userId || existing.farmerId || existing.buyerId || 'system',
+      userName: req.body.userName || existing.farmerName || existing.buyerName || 'System',
+      userRole: req.body.userRole || 'farmer',
+      action: 'updated order',
+      targetId: existing.id,
+      targetType: 'order',
+      details: `Order updated: ${(req.body.status ? `status -> ${req.body.status}` : JSON.stringify(req.body))}`,
+      timestamp: new Date().toISOString(),
+    });
+    saveData(ACTIVITY_FILE, activityLogs);
+  } catch (e) {
+    console.warn('Failed to log activity for order update', e);
+  }
+
+  res.json(orders[idx]);
+});
+
 app.get('/api/activity', (req,res)=> res.json(activityLogs));
 app.post('/api/activity', (req,res)=>{
   const entry = { id: uuidv4(), ...req.body, timestamp: req.body.timestamp ?? new Date().toISOString() };

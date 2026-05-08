@@ -182,6 +182,8 @@ export interface OrderDeliveryInput {
   option: 'pickup' | 'delivery';
   deliveryAddress?: string;
   pickupLocation?: string;
+  paymentMethod?: CheckoutPaymentMethod;
+  recipientName?: string;
 }
 
 export type CheckoutPaymentMethod = 'upi' | 'card' | 'cod';
@@ -194,6 +196,7 @@ export interface CartItem {
 export interface CheckoutInput {
   deliveryAddress: string;
   contactPhone: string;
+  recipientName?: string;
   paymentMethod: CheckoutPaymentMethod;
 }
 
@@ -1032,6 +1035,8 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         deliveryAddress: deliveryOption === 'delivery' ? deliveryInput?.deliveryAddress?.trim() : undefined,
         pickupLocation: deliveryOption === 'pickup' ? deliveryInput?.pickupLocation?.trim() : undefined,
         status: 'pending',
+        paymentMethod: deliveryInput?.paymentMethod,
+        recipientName: deliveryInput?.recipientName?.trim() ?? currentUser.name,
         orderDate: new Date().toISOString().split('T')[0],
         buyerName: currentUser.name,
         farmerName: productInState.farmerName,
@@ -1134,6 +1139,8 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
           const savedOrder = await placeOrder(product, item.quantity, {
             option: 'delivery',
             deliveryAddress: checkout.deliveryAddress.trim(),
+            recipientName: checkout.recipientName?.trim(),
+            paymentMethod: checkout.paymentMethod,
           });
           if (savedOrder) {
             createdOrderIds.push(savedOrder.id);
@@ -1180,26 +1187,41 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   }, []);
 
   const updateOrder = useCallback((id: string, updates: Partial<Order>) => {
-        const existingOrder = orders.find((order) => order.id === id);
+    const existingOrder = orders.find((order) => order.id === id);
 
-        if (currentUser && existingOrder && (updates.status || updates.deliveryStatus)) {
-          addActivityLog({
-            userId: currentUser.id,
-            userName: currentUser.name,
-            userRole: currentUser.role,
-            action: 'updated order status',
-            targetType: 'order',
-            targetId: id,
-            details: `${existingOrder.productName}: ${updates.status ?? existingOrder.status}`,
-          });
-        }
+    if (currentUser && existingOrder && (updates.status || updates.deliveryStatus)) {
+      addActivityLog({
+        userId: currentUser.id,
+        userName: currentUser.name,
+        userRole: currentUser.role,
+        action: 'updated order status',
+        targetType: 'order',
+        targetId: id,
+        details: `${existingOrder.productName}: ${updates.status ?? existingOrder.status}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Optimistic update locally so UI updates immediately
     setOrders((prev) => {
-      const updated = prev.map((o) =>
-        o.id === id ? normalizeOrder({ ...o, ...updates }) : o
-      );
+      const updated = prev.map((o) => (o.id === id ? normalizeOrder({ ...o, ...updates }) : o));
       localStorage.setItem('orders', JSON.stringify(updated));
       return updated;
     });
+
+    // Persist change to backend (best-effort). Update local state with server response when available.
+    void (async () => {
+      try {
+        const saved = await api.updateOrderApi(id, updates);
+        setOrders((prev) => {
+          const updated = prev.map((o) => (o.id === id ? normalizeOrder(saved) : o));
+          localStorage.setItem('orders', JSON.stringify(updated));
+          return updated;
+        });
+      } catch (err) {
+        console.error('Failed to persist order update', err);
+      }
+    })();
   }, [addActivityLog, currentUser, orders]);
 
   const deleteOrder = useCallback((id: string) => {

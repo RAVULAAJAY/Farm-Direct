@@ -31,6 +31,7 @@ export const addProductReview = (productId: string, review: Omit<ProductReview, 
 
 export const fetchOrders = () => request<Order[]>('/orders');
 export const createOrder = (order: Omit<Order, 'id' | 'orderDate' | 'status' | 'deliveryStatus'>) => request<Order>('/orders', { method: 'POST', body: JSON.stringify(order) });
+export const updateOrderApi = (id: string, updates: Partial<Order>) => request<Order>(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export interface ActivityLogItem {
   id: string;

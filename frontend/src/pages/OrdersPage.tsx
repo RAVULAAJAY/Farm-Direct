@@ -704,6 +704,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                 <p><span className="font-medium">Delivery Method:</span> {formatDeliveryMethod(selectedOrder.deliveryOption)}</p>
                 <p><span className="font-medium">Delivery Status:</span> {formatDeliveryStatus(selectedOrder.deliveryStatus)}</p>
                 <p><span className="font-medium">Total:</span> ₹{selectedOrder.totalPrice}</p>
+                {selectedOrder.paidAmount !== undefined && (
+                  <p><span className="font-medium">Paid Amount:</span> ₹{selectedOrder.paidAmount}</p>
+                )}
+                {selectedOrder.paymentReference && (
+                  <p><span className="font-medium">Payment Ref:</span> {selectedOrder.paymentReference}</p>
+                )}
               </div>
               <Button variant="outline" className="w-full" onClick={() => handleOpenDeliveryTracking(selectedOrder)}>
                 <Truck className="mr-2 h-4 w-4" />

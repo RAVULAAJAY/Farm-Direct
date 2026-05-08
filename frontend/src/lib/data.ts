@@ -60,8 +60,13 @@ export interface Order {
   deliveryAddress?: string;
   pickupLocation?: string;
   status: 'pending' | 'accepted' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+  // payment fields
+  paymentMethod?: 'upi' | 'card' | 'cod';
+  paidAmount?: number;
+  paymentReference?: string;
   orderDate: string;
   deliveryDate?: string;
+  recipientName?: string;
   buyerName: string;
   farmerName: string;
 }
