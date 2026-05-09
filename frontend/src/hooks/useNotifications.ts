@@ -8,7 +8,7 @@ export default function useNotifications() {
     addNotification,
     addActivityLog,
     addMessage: addMessageToState,
-    markNotificationAsRead,
+    addOrder,
   } = useGlobalState();
 
   useEffect(() => {
@@ -58,6 +58,17 @@ export default function useNotifications() {
       }
     };
 
+    const handleOrderPlaced = (payload: any) => {
+      try {
+        if (!payload || !currentUser) return;
+        if (payload.farmerId === currentUser.id) {
+          addOrder(payload);
+        }
+      } catch (e) {
+        console.error('Failed to handle order placed event', e);
+      }
+    };
+
     const handleCartUpdate = (payload: any) => {
       // Cart updates from other tabs/devices - just for awareness
       // Local state is already updated via localStorage sync
@@ -72,6 +83,7 @@ export default function useNotifications() {
     on('notification:update', handleUpdateNotification);
     on('notification:delete', handleDeleteNotification);
     on('message:new', handleMessageNew);
+    on('order:placed', handleOrderPlaced);
     on('cart:update', handleCartUpdate);
 
     if (currentUser) {
@@ -83,8 +95,9 @@ export default function useNotifications() {
       off('notification:update', handleUpdateNotification);
       off('notification:delete', handleDeleteNotification);
       off('message:new', handleMessageNew);
+      off('order:placed', handleOrderPlaced);
       off('cart:update', handleCartUpdate);
     };
-  }, [currentUser, addNotification, addActivityLog, addMessageToState, markNotificationAsRead]);
+  }, [currentUser, addNotification, addActivityLog, addMessageToState, addOrder]);
 }
 

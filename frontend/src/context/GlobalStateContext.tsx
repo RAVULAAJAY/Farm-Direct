@@ -1319,6 +1319,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   // Order operations
   const addOrder = useCallback((order: Order) => {
     setOrders((prev) => {
+      if (prev.some((existing) => existing.id === order.id)) {
+        return prev;
+      }
       const updated = [...prev, normalizeOrder(order)];
       localStorage.setItem('orders', JSON.stringify(updated));
       return updated;

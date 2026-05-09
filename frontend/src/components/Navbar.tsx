@@ -81,6 +81,18 @@ const Navbar: React.FC<NavbarProps> = ({
   const handleNotificationClick = (notification: Notification) => {
     if (notification.actionUrl) {
       handleNavigate(notification.actionUrl);
+      return;
+    }
+
+    switch (notification.type) {
+      case 'order':
+        handleNavigate('/orders');
+        break;
+      case 'message':
+        handleNavigate('/messages');
+        break;
+      default:
+        handleNavigate('/notifications');
     }
   };
 

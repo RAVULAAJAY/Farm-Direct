@@ -44,7 +44,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggle,
   currentPath = ''
 }): React.ReactNode => {
-  const { cartItems, currentUser, getUnreadMessageCount, getUnreadNotificationCount, favoriteProductIds, products } = useGlobalState();
+  const { cartItems, currentUser, getUnreadMessageCount, getUnreadNotificationCount, favoriteProductIds, products, orders } = useGlobalState();
   const isFarmer = user.role === 'farmer';
   const isBuyer = user.role === 'buyer';
   const isAdmin = user.role === 'admin';
@@ -94,6 +94,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   const getBadgeCount = (path: string): number => {
     if (!currentUser) return 0;
     if (path === '/cart') return cartItems.length;
+    if (path === '/orders') {
+      if (currentUser.role === 'farmer') {
+        return orders.filter((order) => order.farmerId === currentUser.id && order.status === 'pending').length;
+      }
+      return orders.filter((order) => order.buyerId === currentUser.id).length;
+    }
     if (path === '/favorites') {
       return favoriteProductIds.filter((id) => products.some((product) => product.id === id)).length;
     }
