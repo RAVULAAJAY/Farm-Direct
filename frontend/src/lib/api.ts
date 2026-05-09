@@ -58,3 +58,20 @@ export interface ActivityLogItem {
 }
 
 export const fetchActivityLogs = () => request<ActivityLogItem[]>('/activity');
+
+export interface NotificationItem {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  actionUrl?: string | null;
+}
+
+export const fetchNotifications = (userId?: string) => request<NotificationItem[]>(`/notifications${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`);
+export const fetchUnreadNotificationCount = (userId: string) => request<{ unread: number }>(`/notifications/unread-count?userId=${encodeURIComponent(userId)}`);
+export const createNotificationApi = (payload: Omit<Partial<NotificationItem>, 'id'>) => request<NotificationItem>('/notifications', { method: 'POST', body: JSON.stringify(payload) });
+export const updateNotificationApi = (id: string, updates: Partial<NotificationItem>) => request<NotificationItem>(`/notifications/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
+export const deleteNotificationApi = (id: string) => request<{ success: boolean }>(`/notifications/${id}`, { method: 'DELETE' });

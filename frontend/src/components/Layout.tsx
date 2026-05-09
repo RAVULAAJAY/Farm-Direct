@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Navbar from '@/components/Navbar';
 import Sidebar from '@/components/Sidebar';
+import useNotifications from '@/hooks/useNotifications';
 import { User as UserType } from '@/context/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -27,6 +28,8 @@ const Layout: React.FC<LayoutProps> = ({
   };
 
   const activePath = currentPath && currentPath !== '' ? currentPath : `${location.pathname}${location.search}`;
+
+  useNotifications();
 
   return (
     <div className="flex h-screen bg-gradient-to-br from-white via-green-50 to-blue-50 overflow-hidden">

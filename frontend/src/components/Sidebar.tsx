@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { User as UserType } from '@/context/AuthContext';
 import BrandLogo from '@/components/BrandLogo';
+import { useGlobalState } from '@/context/GlobalStateContext';
 
 interface SidebarProps {
   user: UserType;
@@ -43,6 +44,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggle,
   currentPath = ''
 }): React.ReactNode => {
+  const { cartItems, currentUser, getUnreadMessageCount, getUnreadNotificationCount } = useGlobalState();
   const isFarmer = user.role === 'farmer';
   const isBuyer = user.role === 'buyer';
   const isAdmin = user.role === 'admin';
@@ -88,6 +90,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const filteredItems = navItems.filter((item) => item.show);
+
+  const getBadgeCount = (path: string): number => {
+    if (!currentUser) return 0;
+    if (path === '/cart') return cartItems.length;
+    if (path === '/messages') return getUnreadMessageCount(currentUser.id);
+    if (path === '/notifications') return getUnreadNotificationCount(currentUser.id);
+    return 0;
+  };
 
   const handleNavigate = (path: string) => {
     if (onNavigate) {
@@ -162,6 +172,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               const Icon = item.icon;
               const active = isActive(item.path);
               const roleColors = getRoleColor(user.role);
+              const badgeCount = getBadgeCount(item.path);
               
               return (
                 <button
@@ -178,6 +189,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                 >
                   <Icon className={`h-5 w-5 flex-shrink-0 transform transition-transform group-hover:scale-110 ${active ? '' : 'group-hover:translate-x-1'}`} />
                   <span className="text-sm flex-1">{item.label}</span>
+                  {badgeCount > 0 && (
+                    <span className="inline-flex items-center justify-center h-5 w-5 text-xs font-bold text-white bg-red-500 rounded-full">
+                      {badgeCount > 99 ? '99+' : badgeCount}
+                    </span>
+                  )}
                   {active && <ChevronRight className="h-4 w-4 ml-auto animate-in slide-in-from-left" />}
                 </button>
               );

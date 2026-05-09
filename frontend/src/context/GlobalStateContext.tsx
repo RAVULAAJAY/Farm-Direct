@@ -5,6 +5,7 @@ import {
   Order,
 } from '@/lib/data';
 import * as api from '@/lib/api';
+import * as socket from '@/lib/socket';
 
 export type UserRole = 'farmer' | 'buyer' | 'admin';
 export type AuthMode = 'login' | 'signup' | null;
@@ -434,7 +435,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
           api.fetchProducts(),
           api.fetchOrders(),
           api.fetchActivityLogs(),
-          Promise.resolve([]), // no notifications endpoint yet
+          Promise.resolve([]), // notifications loaded per-user below
           api.fetchMessages(),
         ]);
 
@@ -524,6 +525,21 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
     return () => clearInterval(poll);
   }, []);
+
+  // Load notifications for current user when they log in
+  useEffect(() => {
+    const loadForUser = async () => {
+      try {
+        if (!currentUser) return;
+        const fetched = await api.fetchNotifications(currentUser.id);
+        setNotifications(fetched);
+      } catch (e) {
+        console.warn('Failed to load notifications for user', e);
+      }
+    };
+
+    void loadForUser();
+  }, [currentUser]);
 
   const notifyAdmins = useCallback((
     title: string,
@@ -1060,9 +1076,15 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         : [...prev, { productId, quantity: safeQuantity }];
 
       localStorage.setItem('cartItems', JSON.stringify(updated));
+      // Emit cart update via socket
+      if (currentUser) {
+        try {
+          socket.emit('cart:update', { userId: currentUser.id, count: updated.length });
+        } catch (e) {}
+      }
       return updated;
     });
-  }, []);
+  }, [currentUser]);
 
   const updateCartItemQuantity = useCallback((productId: string, quantity: number) => {
     setCartItems((prev) => {
@@ -1075,22 +1097,40 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
             );
 
       localStorage.setItem('cartItems', JSON.stringify(updated));
+      // Emit cart update via socket
+      if (currentUser) {
+        try {
+          socket.emit('cart:update', { userId: currentUser.id, count: updated.length });
+        } catch (e) {}
+      }
       return updated;
     });
-  }, []);
+  }, [currentUser]);
 
   const removeFromCart = useCallback((productId: string) => {
     setCartItems((prev) => {
       const updated = prev.filter((item) => item.productId !== productId);
       localStorage.setItem('cartItems', JSON.stringify(updated));
+      // Emit cart update via socket
+      if (currentUser) {
+        try {
+          socket.emit('cart:update', { userId: currentUser.id, count: updated.length });
+        } catch (e) {}
+      }
       return updated;
     });
-  }, []);
+  }, [currentUser]);
 
   const clearCart = useCallback(() => {
     setCartItems([]);
     localStorage.setItem('cartItems', JSON.stringify([]));
-  }, []);
+    // Emit cart update via socket
+    if (currentUser) {
+      try {
+        socket.emit('cart:update', { userId: currentUser.id, count: 0 });
+      } catch (e) {}
+    }
+  }, [currentUser]);
 
   const placeOrder = useCallback(
     async (product: Product, quantity: number, deliveryInput?: OrderDeliveryInput) => {
@@ -1476,6 +1516,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       localStorage.setItem('notifications', JSON.stringify(updated));
       return updated;
     });
+    void api.updateNotificationApi(notificationId, { read: true }).catch((error) => {
+      console.error('Failed to persist notification read state', error);
+    });
   }, []);
 
   const deleteNotification = useCallback((notificationId: string) => {
@@ -1483,6 +1526,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       const updated = prev.filter((notification) => notification.id !== notificationId);
       localStorage.setItem('notifications', JSON.stringify(updated));
       return updated;
+    });
+    void api.deleteNotificationApi(notificationId).catch((error) => {
+      console.error('Failed to delete notification', error);
     });
   }, []);
 
@@ -1492,6 +1538,15 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       localStorage.setItem('notifications', JSON.stringify(updated));
       return updated;
     });
+    // Mark remote notifications as read for this user
+    void (async () => {
+      try {
+        const list = await api.fetchNotifications(userId);
+        await Promise.all(list.map((n) => api.updateNotificationApi(n.id, { read: true })));
+      } catch (e) {
+        console.warn('Failed to clear remote notifications', e);
+      }
+    })();
   }, []);
 
   const getUnreadNotificationCount = useCallback(

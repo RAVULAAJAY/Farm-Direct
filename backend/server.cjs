@@ -72,6 +72,14 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Notifications persistence
+const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
+function loadNotifications() {
+  try { return JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE, 'utf8') || '[]'); } catch { return []; }
+}
+function saveNotifications(data){ fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(data, null, 2)); }
+let notifications = loadNotifications();
+
 app.get('/api/users', (req, res) => res.json(users));
 app.post('/api/users', (req, res) => {
   // Handle password hashing if provided
@@ -198,6 +206,23 @@ app.post('/api/orders', (req, res) => {
   saveData(ORDERS_FILE, orders);
   activityLogs.unshift({ id: uuidv4(), userId: order.buyerId, userName: order.buyerName, userRole: 'buyer', action: 'placed order', targetId: order.id, targetType: 'order', timestamp: new Date().toISOString() });
   saveData(ACTIVITY_FILE, activityLogs);
+  // Notify farmer
+  try {
+    const notif = {
+      id: uuidv4(),
+      userId: order.farmerId,
+      type: 'order',
+      title: 'New order received',
+      message: `${order.buyerName} placed an order for ${order.productName}`,
+      timestamp: new Date().toISOString(),
+      read: false,
+      actionUrl: '/orders'
+    };
+    notifications.unshift(notif);
+    saveNotifications(notifications);
+    if (io) io.to(`user_${order.farmerId}`).emit('notification:new', notif);
+    if (io) io.to(`user_${order.farmerId}`).emit('order:placed', order);
+  } catch(e) {}
   res.status(201).json(order);
 });
 
@@ -228,6 +253,24 @@ app.post('/api/messages', (req, res) => {
     timestamp: new Date().toISOString(),
   });
   saveData(ACTIVITY_FILE, activityLogs);
+  // Create a notification for recipient
+  try {
+    const notif = {
+      id: uuidv4(),
+      userId: incoming.recipientId,
+      type: 'message',
+      title: `New message from ${incoming.senderName}`,
+      message: incoming.content.substring(0, 240),
+      timestamp: incoming.timestamp || new Date().toISOString(),
+      read: false,
+      actionUrl: '/messages'
+    };
+    notifications.unshift(notif);
+    saveNotifications(notifications);
+    if (io) io.to(`user_${incoming.recipientId}`).emit('notification:new', notif);
+    if (io) io.to(`user_${incoming.recipientId}`).emit('message:new', incoming);
+  } catch (e) {}
+
   res.status(201).json(incoming);
 });
 app.put('/api/messages/:id', (req, res) => {
@@ -538,5 +581,92 @@ app.get('/', (req, res) => {
   });
 });
 
+// Notifications API
+app.get('/api/notifications', (req, res) => {
+  const userId = req.query.userId ? String(req.query.userId) : null;
+  if (userId) return res.json(notifications.filter(n => n.userId === userId));
+  return res.json(notifications);
+});
+
+app.get('/api/notifications/unread-count', (req, res) => {
+  const userId = req.query.userId ? String(req.query.userId) : null;
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+  const count = notifications.filter(n => n.userId === userId && !n.read).length;
+  res.json({ unread: count });
+});
+
+app.post('/api/notifications', (req, res) => {
+  const incoming = {
+    id: uuidv4(),
+    userId: String(req.body.userId || ''),
+    type: String(req.body.type || 'update'),
+    title: String(req.body.title || ''),
+    message: String(req.body.message || ''),
+    timestamp: req.body.timestamp || new Date().toISOString(),
+    read: Boolean(req.body.read || false),
+    actionUrl: req.body.actionUrl || null,
+  };
+  // Prevent obvious duplicates: same userId + type + title within 2 seconds
+  const now = Date.now();
+  const dup = notifications.find(n => n.userId === incoming.userId && n.type === incoming.type && n.title === incoming.title && Math.abs(new Date(n.timestamp).getTime() - now) < 2000);
+  if (dup) return res.status(409).json({ error: 'duplicate' });
+
+  notifications.unshift(incoming);
+  saveNotifications(notifications);
+  // Emit via socket if available
+  try { if (io) io.to(`user_${incoming.userId}`).emit('notification:new', incoming); } catch (e) {}
+  res.status(201).json(incoming);
+});
+
+app.put('/api/notifications/:id', (req, res) => {
+  const idx = notifications.findIndex(n => n.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'Not found' });
+  notifications[idx] = { ...notifications[idx], ...req.body };
+  saveNotifications(notifications);
+  try { if (io) io.to(`user_${notifications[idx].userId}`).emit('notification:update', notifications[idx]); } catch (e) {}
+  res.json(notifications[idx]);
+});
+
+app.delete('/api/notifications/:id', (req, res) => {
+  const idx = notifications.findIndex(n => n.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'Not found' });
+  const removed = notifications.splice(idx,1)[0];
+  saveNotifications(notifications);
+  try { if (io) io.to(`user_${removed.userId}`).emit('notification:delete', { id: removed.id }); } catch (e) {}
+  res.json({ success: true });
+});
+
+// Upgrade to HTTP server with Socket.IO
+const http = require('http');
+const server = http.createServer(app);
+let io;
+try {
+  const { Server } = require('socket.io');
+  io = new Server(server, { cors: { origin: '*' } });
+
+  io.on('connection', (socket) => {
+    socket.on('join', (data) => {
+      try {
+        const userId = String(data?.userId || data);
+        if (userId) socket.join(`user_${userId}`);
+      } catch (e) {}
+    });
+
+    socket.on('leave', (data) => {
+      try { const userId = String(data?.userId || data); if (userId) socket.leave(`user_${userId}`); } catch(e){}
+    });
+
+    socket.on('cart:update', (payload) => {
+      // payload: { userId, count }
+      try { if (payload && payload.userId) io.to(`user_${payload.userId}`).emit('cart:update', payload); } catch(e){}
+    });
+
+    socket.on('disconnect', () => {});
+  });
+} catch (e) {
+  console.warn('Socket.IO not available', e && e.message ? e.message : e);
+}
+
 app.use((_,res)=>res.status(404).json({error:'Not found'}));
-app.listen(PORT, ()=>console.log(`API server running at http://localhost:${PORT}`));
+const listenTarget = PORT || 4000;
+server.listen(listenTarget, ()=>console.log(`API server running at http://localhost:${listenTarget}`));
