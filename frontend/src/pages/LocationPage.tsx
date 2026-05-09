@@ -1,11 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ExternalLink, MapPin, Navigation, Search } from 'lucide-react';
 import LocationSelector, { DEFAULT_LOCATION_OPTIONS, LocationOption } from '@/components/Location/LocationSelector';
 import NearbyFarmers, { Farmer } from '@/components/Location/NearbyFarmers';
+import FarmerProfileSection from '@/components/Farmer/FarmerProfileSection';
 import { useGlobalState } from '@/context/GlobalStateContext';
+import { User } from '@/context/AuthContext';
 
 const buildMapsSearchUrl = (location: LocationOption) => {
   if (location.coordinates) {
@@ -35,9 +38,13 @@ const requestCurrentLocation = (): Promise<GeolocationPosition> => {
 const LocationPage: React.FC = () => {
   const { users } = useGlobalState();
   const [selectedLocation, setSelectedLocation] = useState<LocationOption | null>(null);
+  const [selectedFarmer, setSelectedFarmer] = useState<User | null>(null);
   const [manualLocation, setManualLocation] = useState('');
   const [locationError, setLocationError] = useState('');
   const [isDetectingCurrentLocation, setIsDetectingCurrentLocation] = useState(false);
+  const selectedFarmerRef = useRef<HTMLDivElement | null>(null);
+
+  type FarmerWithUser = Farmer & { user: User };
 
   const allFarmers = useMemo(() => {
     return users
@@ -45,7 +52,9 @@ const LocationPage: React.FC = () => {
       .map((farmer) => ({
         id: farmer.id,
         name: farmer.farmName || farmer.name,
-        avatar: `data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="45" fill="%2322c55e"/%3E%3Ctext x="50" y="60" font-size="40" fill="white" text-anchor="middle" font-family="Arial"%3E${(farmer.farmName || farmer.name).substring(0, 2).toUpperCase()}%3C/text%3E%3C/svg%3E`,
+        avatar: farmer.profilePhoto
+          ? farmer.profilePhoto
+          : `data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="45" fill="%2322c55e"/%3E%3Ctext x="50" y="60" font-size="40" fill="white" text-anchor="middle" font-family="Arial"%3E${(farmer.farmName || farmer.name).substring(0, 2).toUpperCase()}%3C/text%3E%3C/svg%3E`,
         location: farmer.location,
         distance: Math.random() * 50,
         rating: 4.5 + Math.random() * 0.5,
@@ -57,7 +66,8 @@ const LocationPage: React.FC = () => {
         speciality: (farmer.cropTypes || []).join(', ') || 'Fresh Produce',
         priceRange: '₹20-60/kg',
         description: farmer.farmDetails || 'Quality fresh produce from local farmer.',
-      })) as Farmer[];
+        user: farmer,
+      })) as Array<Farmer & { user: User }>;
   }, [users]);
 
   const nearbyFarmers = useMemo(() => {
@@ -75,11 +85,28 @@ const LocationPage: React.FC = () => {
     setLocationError('');
     const nextLocation = location ? (location.coordinates ? location : DEFAULT_LOCATION_OPTIONS.find((entry) => entry.city === location.city || entry.name === location.name) ?? location) : null;
     setSelectedLocation(nextLocation);
+    setSelectedFarmer(null);
     setManualLocation(nextLocation?.city || nextLocation?.name || '');
 
     if (nextLocation) {
       setManualLocation(nextLocation.city || nextLocation.name || '');
     }
+  };
+
+  useEffect(() => {
+    if (selectedFarmerRef.current) {
+      selectedFarmerRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedFarmer]);
+
+  const navigate = useNavigate();
+
+  const handleFarmerClick = (farmer: FarmerWithUser) => {
+    setSelectedFarmer(farmer.user);
+  };
+
+  const handleFarmerChat = (farmerId: string) => {
+    navigate(`/messages?partnerId=${encodeURIComponent(farmerId)}`);
   };
 
   const handleManualSearch = () => {
@@ -108,6 +135,7 @@ const LocationPage: React.FC = () => {
   const handleUseCurrentLocation = async () => {
     setIsDetectingCurrentLocation(true);
     setLocationError('');
+    setSelectedFarmer(null);
 
     try {
       const position = await requestCurrentLocation();
@@ -163,13 +191,13 @@ const LocationPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 pb-8">
+    <div className="space-y-6 pb-8 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Find Farmers Near You</h1>
-        <p className="text-gray-600 mt-2">Connect directly with local farmers and get fresh produce delivered</p>
+        <p className="text-gray-600 mt-2">Connect directly with local farmers and get fresh produce delivered.</p>
       </div>
 
-      <div className="max-w-xl">
+      <div className="space-y-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -275,13 +303,33 @@ const LocationPage: React.FC = () => {
                 Farmers Found
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <NearbyFarmers
                 farmers={nearbyFarmers}
                 selectedLocation={selectedLocation.city}
                 maxDistance={50}
+                selectedFarmerId={selectedFarmer?.id}
+                onFarmerClick={handleFarmerClick}
+                onMessage={handleFarmerChat}
                 emptyMessage={`No farmers found for ${selectedLocation.city}`}
               />
+
+              {selectedFarmer && (
+                <div ref={selectedFarmerRef} className="rounded-3xl border border-green-200 bg-white p-4 shadow-sm">
+                  <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-green-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.2em] text-green-700">Selected Farmer</p>
+                      <h2 className="text-2xl font-bold text-gray-900 mt-1">
+                        {selectedFarmer.farmName || selectedFarmer.name}
+                      </h2>
+                    </div>
+                    <div className="inline-flex items-center rounded-full border border-green-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-green-700">
+                      Profile Details
+                    </div>
+                  </div>
+                  <FarmerProfileSection user={selectedFarmer} />
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

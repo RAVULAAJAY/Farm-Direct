@@ -35,6 +35,7 @@ interface NearbyFarmersProps {
   farmers: Farmer[];
   selectedLocation?: string;
   maxDistance?: number;
+  selectedFarmerId?: string;
   onFarmerClick?: (farmer: Farmer) => void;
   onMessage?: (farmerId: string) => void;
   isLoading?: boolean;
@@ -45,6 +46,7 @@ const NearbyFarmers: React.FC<NearbyFarmersProps> = ({
   farmers,
   selectedLocation = '',
   maxDistance = 50,
+  selectedFarmerId,
   onFarmerClick,
   onMessage,
   isLoading = false,
@@ -114,7 +116,9 @@ const NearbyFarmers: React.FC<NearbyFarmersProps> = ({
       {sortedFarmers.map((farmer) => (
         <Card
           key={farmer.id}
-          className="hover:shadow-lg transition-shadow cursor-pointer border-l-4 border-l-green-200"
+          className={`hover:shadow-lg transition-shadow cursor-pointer border-l-4 ${
+            selectedFarmerId === farmer.id ? 'border-l-green-500 bg-green-50/70' : 'border-l-green-200'
+          }`}
           onClick={() => onFarmerClick?.(farmer)}
         >
           <CardContent className="p-4">

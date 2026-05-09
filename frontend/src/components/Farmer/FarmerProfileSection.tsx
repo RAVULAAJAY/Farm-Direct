@@ -32,81 +32,79 @@ const FarmerProfileSection: React.FC<FarmerProfileSectionProps> = ({
       totalListings: myProducts.length,
       activeListings: myProducts.filter((product) => (product.stock ?? product.quantity ?? 0) > 0).length,
       totalSold: deliveredOrders.reduce((sum, order) => sum + order.quantity, 0),
-      totalRevenue: deliveredOrders.reduce((sum, order) => sum + order.totalAmount, 0),
       joinDate: user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A',
     };
   }, [orders, products, user.createdAt, user.id]);
 
-  const farmerProofDataUrl = user.farmerOnboarding?.idProofDataUrl ?? '';
-  const farmerProofFileName = user.farmerOnboarding?.idProofFileName ?? 'ID proof';
 
   return (
     <Card>
       <CardContent className="pt-6">
         <div className="space-y-6">
           {/* Header with Profile */}
-          <div className="flex items-start justify-between mb-6">
-            <div className="flex items-center gap-6">
-              <div className="text-6xl bg-green-100 w-24 h-24 rounded-full flex items-center justify-center">
-                🧑‍🌾
+          <div className="space-y-6 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-5">
+                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-green-100 text-4xl">
+                  🧑‍🌾
+                </div>
+                <div>
+                  <h2 className="text-3xl font-bold text-gray-900">{user.name}</h2>
+                  <p className="text-sm text-gray-600 mt-1">{user.farmName || `${user.name}'s Farm`}</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-3xl font-bold text-gray-900">{user.name}</h2>
-                <p className="text-sm text-gray-600 mt-1">{user.farmName || `${user.name}'s Farm`}</p>
+              {onEditProfile ? (
+                <Button variant="outline" className="gap-2" onClick={onEditProfile}>
+                  <Edit className="h-4 w-4" />
+                  Edit Profile
+                </Button>
+              ) : null}
+            </div>
+            <div className="rounded-2xl bg-gray-50 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-start">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-gray-600 shadow-sm">
+                  <Mail className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-500">Email</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900 break-words">{user.email}</p>
+                </div>
               </div>
             </div>
-            <Button variant="outline" className="gap-2" onClick={onEditProfile}>
-              <Edit className="h-4 w-4" />
-              Edit Profile
-            </Button>
           </div>
 
           {/* Contact Information */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="flex items-center gap-3">
-              <Mail className="h-5 w-5 text-gray-400" />
-              <div>
-                <p className="text-xs text-gray-600">Email</p>
-                <p className="font-medium text-gray-900">{user.email}</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white text-gray-600 shadow-sm">
+                  <Phone className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-500">Phone</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900 truncate">{user.phone}</p>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Phone className="h-5 w-5 text-gray-400" />
-              <div>
-                <p className="text-xs text-gray-600">Phone</p>
-                <p className="font-medium text-gray-900">{user.phone}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <MapPin className="h-5 w-5 text-gray-400" />
-              <div>
-                <p className="text-xs text-gray-600">Location</p>
-                <p className="font-medium text-gray-900">{user.location}</p>
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white text-gray-600 shadow-sm">
+                  <MapPin className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-500">Location</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900 leading-6 break-words">{user.location}</p>
+                </div>
               </div>
             </div>
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <p className="text-xs text-gray-600 mb-1">Active Listings</p>
-              <p className="text-2xl font-bold text-green-700">{farmerStats.activeListings}</p>
-              <p className="text-xs text-gray-500 mt-1">of {farmerStats.totalListings}</p>
-            </div>
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-              <p className="text-xs text-gray-600 mb-1">Total Sold</p>
-              <p className="text-2xl font-bold text-blue-700">{farmerStats.totalSold}</p>
-              <p className="text-xs text-gray-500 mt-1">products</p>
-            </div>
-            <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-              <p className="text-xs text-gray-600 mb-1">Revenue</p>
-              <p className="text-2xl font-bold text-purple-700">₹{farmerStats.totalRevenue.toLocaleString()}</p>
-              <p className="text-xs text-gray-500 mt-1">this month</p>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
-              <p className="text-xs text-gray-600 mb-1">Member Since</p>
+              <p className="text-xs text-gray-600 mb-1">Joined</p>
               <p className="text-lg font-bold text-orange-700">{farmerStats.joinDate}</p>
-              <p className="text-xs text-gray-500 mt-1">active</p>
+              <p className="text-xs text-gray-500 mt-1">member since</p>
             </div>
           </div>
 
@@ -118,32 +116,6 @@ const FarmerProfileSection: React.FC<FarmerProfileSectionProps> = ({
             </p>
           </div>
 
-          {/* ID Proof */}
-          <div className="border-t pt-4">
-            <h3 className="font-semibold text-gray-900 mb-3">ID Proof</h3>
-            <div className="rounded-lg border bg-gray-50 p-4 space-y-3">
-              {farmerProofDataUrl ? (
-                farmerProofDataUrl.startsWith('data:image/') ? (
-                  <img
-                    src={farmerProofDataUrl}
-                    alt="Uploaded ID proof"
-                    className="h-56 w-full rounded-md object-contain bg-white"
-                  />
-                ) : farmerProofDataUrl.startsWith('data:application/pdf') ? (
-                  <iframe
-                    title="Uploaded ID proof"
-                    src={farmerProofDataUrl}
-                    className="h-56 w-full rounded-md bg-white"
-                  />
-                ) : (
-                  <p className="text-sm text-gray-600">Uploaded proof is available, but this format cannot be previewed here.</p>
-                )
-              ) : (
-                <p className="text-sm text-gray-600">No proof uploaded yet.</p>
-              )}
-              <p className="text-sm font-medium text-gray-900">{farmerProofFileName}</p>
-            </div>
-          </div>
 
           {/* Certifications */}
           <div className="bg-green-50 border border-green-200 p-4 rounded-lg">

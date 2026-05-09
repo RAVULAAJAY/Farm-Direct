@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell, X, Trash2, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,6 +37,7 @@ const NotificationBell: React.FC<NotificationBellProps> = ({
   onClearAll,
   onDeleteNotification
 }) => {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [selectedTab, setSelectedTab] = useState<'all' | NotificationType>('all');
 
@@ -257,6 +259,10 @@ const NotificationBell: React.FC<NotificationBellProps> = ({
                     variant="ghost"
                     size="sm"
                     className="text-xs text-blue-600 hover:text-blue-700"
+                    onClick={() => {
+                      navigate('/notifications');
+                      setOpen(false);
+                    }}
                   >
                     View all notifications
                   </Button>

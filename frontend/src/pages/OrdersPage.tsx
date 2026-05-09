@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -108,6 +108,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const isFarmer = user.role === 'farmer';
   const isBuyer = user.role === 'buyer';
   const activeUserId = currentUser?.id ?? user.id;
+  const [searchParams] = useSearchParams();
 
   const buyerOrders = useMemo(
     () => orders.filter((order) => order.buyerId === activeUserId),
@@ -137,6 +138,26 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const handleViewInvoice = (order: Order) => {
     setSelectedInvoiceOrder(order);
   };
+
+  useEffect(() => {
+    const orderId = searchParams.get('orderId');
+    if (!orderId) {
+      return;
+    }
+
+    const matchedOrder = orders.find((order) => order.id === orderId);
+    if (!matchedOrder) {
+      return;
+    }
+
+    const belongsToUser = matchedOrder.buyerId === activeUserId || matchedOrder.farmerId === activeUserId;
+    if (!belongsToUser) {
+      return;
+    }
+
+    setSelectedOrder(matchedOrder);
+    setShowOrderDetail(true);
+  }, [searchParams, orders, activeUserId]);
 
   useEffect(() => {
     if (!selectedOrder) {

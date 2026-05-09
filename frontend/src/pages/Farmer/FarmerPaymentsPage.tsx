@@ -71,6 +71,10 @@ const FarmerPaymentsPage: React.FC<FarmerPaymentsPageProps> = ({ user }) => {
   const recentCompletedPayments = completedPayments.slice(0, 5);
   const recentPendingPayments = pendingPayments.slice(0, 5);
 
+  const handleOpenOrder = (orderId: string) => {
+    navigate(`/orders?orderId=${encodeURIComponent(orderId)}`);
+  };
+
   return (
     <div className="space-y-6 pb-8">
       <Card className="border-0 shadow-sm bg-gradient-to-r from-emerald-700 to-green-600 text-white">
@@ -168,7 +172,16 @@ const FarmerPaymentsPage: React.FC<FarmerPaymentsPageProps> = ({ user }) => {
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <p className="font-semibold text-gray-900">{order.productName}</p>
-                        <p className="text-sm text-gray-600">Buyer: {order.buyerName}</p>
+                        <p className="text-sm text-gray-600">
+                          Buyer: {' '}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenOrder(order.id)}
+                            className="font-semibold text-green-700 underline underline-offset-2 hover:text-green-900"
+                          >
+                            {order.buyerName}
+                          </button>
+                        </p>
                         <p className="text-sm text-gray-600">Delivered: {formatDate(order.deliveryDate ?? order.orderDate)}</p>
                       </div>
                       <div className="text-left sm:text-right">
@@ -198,7 +211,16 @@ const FarmerPaymentsPage: React.FC<FarmerPaymentsPageProps> = ({ user }) => {
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <p className="font-semibold text-gray-900">{order.productName}</p>
-                        <p className="text-sm text-gray-600">Buyer: {order.buyerName}</p>
+                        <p className="text-sm text-gray-600">
+                          Buyer: {' '}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenOrder(order.id)}
+                            className="font-semibold text-green-700 underline underline-offset-2 hover:text-green-900"
+                          >
+                            {order.buyerName}
+                          </button>
+                        </p>
                         <p className="text-sm text-gray-600">Order date: {formatDate(order.orderDate)}</p>
                       </div>
                       <div className="text-left sm:text-right">

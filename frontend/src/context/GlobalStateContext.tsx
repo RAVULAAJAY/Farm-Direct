@@ -222,7 +222,7 @@ const normalizeOrder = (order: Order): Order => {
   };
 };
 
-export type NotificationType = 'order' | 'message' | 'update' | 'review';
+export type NotificationType = 'order' | 'message' | 'update';
 
 export interface AppNotification {
   id: string;
@@ -418,10 +418,12 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     return normalizeMessages(storedMessages);
   });
 
+  const normalizeFavoriteIds = (ids: string[]) => Array.from(new Set(ids.filter(Boolean)));
+
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>(() => {
-    return readStoredValue<string[]>('favoriteProductIds') ?? [];
+    return normalizeFavoriteIds(readStoredValue<string[]>('favoriteProductIds') ?? []);
   });
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
     return readStoredValue<CartItem[]>('cartItems') ?? [];
@@ -623,7 +625,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       }
 
       if (event.key === 'favoriteProductIds') {
-        const nextFavorites = readStoredValue<string[]>('favoriteProductIds') ?? [];
+        const nextFavorites = normalizeFavoriteIds(readStoredValue<string[]>('favoriteProductIds') ?? []);
         setFavoriteProductIds(nextFavorites);
         return;
       }
@@ -1032,6 +1034,11 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     try {
       await api.deleteProductApi(id);
       setProducts((prev) => prev.filter((p) => p.id !== id));
+      setFavoriteProductIds((prev) => {
+        const updated = prev.filter((favoriteId) => favoriteId !== id);
+        localStorage.setItem('favoriteProductIds', JSON.stringify(updated));
+        return updated;
+      });
     } catch (error) {
       console.error('Failed to delete product', error);
     }
@@ -1049,9 +1056,10 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
   const toggleFavoriteProduct = useCallback((productId: string) => {
     setFavoriteProductIds((prev) => {
-      const updated = prev.includes(productId)
-        ? prev.filter((id) => id !== productId)
-        : [...prev, productId];
+      const normalizedPrev = normalizeFavoriteIds(prev);
+      const updated = normalizedPrev.includes(productId)
+        ? normalizedPrev.filter((id) => id !== productId)
+        : [...normalizedPrev, productId];
       localStorage.setItem('favoriteProductIds', JSON.stringify(updated));
       return updated;
     });

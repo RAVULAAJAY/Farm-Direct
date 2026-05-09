@@ -108,6 +108,14 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
         conversationMap.set(partnerId, {
           id: partnerId,
           name: partner?.name ?? (isOutgoing ? message.recipientName : message.senderName),
+          role: partner?.role,
+          email: partner?.email,
+          phone: partner?.phone,
+          joinedDate:
+            partner?.joinedDate ??
+            (partner?.createdAt ? new Date(partner.createdAt).toLocaleDateString() : undefined),
+          farmName: partner?.farmName,
+          farmDetails: partner?.farmDetails,
           location: partner?.location ?? 'Local farm',
           avatar: buildAvatar(partner?.name ?? (isOutgoing ? message.recipientName : message.senderName)),
           rating: undefined,
@@ -152,6 +160,14 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
       mergedById.set(entry.id, {
         id: entry.id,
         name: entry.name,
+        role: entry.role,
+        email: entry.email,
+        phone: entry.phone,
+        joinedDate:
+          entry.joinedDate ??
+          (entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : undefined),
+        farmName: entry.farmName,
+        farmDetails: entry.farmDetails,
         location: entry.location,
         avatar: buildAvatar(entry.name),
         rating: undefined,
@@ -227,6 +243,14 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
     return {
       id: partnerUser.id,
       name: partnerUser.name,
+      role: partnerUser.role,
+      email: partnerUser.email,
+      phone: partnerUser.phone,
+      joinedDate:
+        partnerUser.joinedDate ??
+        (partnerUser.createdAt ? new Date(partnerUser.createdAt).toLocaleDateString() : undefined),
+      farmName: partnerUser.farmName,
+      farmDetails: partnerUser.farmDetails,
       location: partnerUser.location,
       avatar: buildAvatar(partnerUser.name),
       rating: undefined,

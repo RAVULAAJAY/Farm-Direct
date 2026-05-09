@@ -3,6 +3,14 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -15,8 +23,14 @@ import MessageInput from './MessageInput';
 export interface ChatParticipant {
   id: string;
   name: string;
+  role?: 'farmer' | 'buyer' | 'admin';
   location: string;
   avatar: string;
+  email?: string;
+  phone?: string;
+  joinedDate?: string;
+  farmName?: string;
+  farmDetails?: string;
   rating?: number;
   responseTime?: string;
   isOnline?: boolean;
@@ -45,6 +59,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   contextInfo,
   onBack,
 }) => {
+  const [isProfileOpen, setIsProfileOpen] = React.useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const previousLayoutRef = useRef({
     conversationId: participant.id,
@@ -179,9 +194,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>View Profile</DropdownMenuItem>
-              <DropdownMenuItem>Mark as unread</DropdownMenuItem>
-              <DropdownMenuItem>Archive conversation</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setIsProfileOpen(true)}>
+                View Profile
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -207,6 +222,72 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         placeholder={`Message ${participant.name}...`}
         initialValue={initialMessage}
       />
+
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{participant.farmName || participant.name}</DialogTitle>
+            <DialogDescription>
+              Basic profile and farm details. Only public information is shown.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-4">
+                <Avatar className="h-16 w-16">
+                  <AvatarImage src={participant.avatar} alt={participant.name} />
+                  <AvatarFallback>{participant.name.charAt(0)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="text-lg font-semibold text-gray-900">{participant.name}</p>
+                  <span className="inline-flex rounded-full bg-green-50 px-2 py-1 text-xs font-medium uppercase tracking-[0.15em] text-green-700">
+                    {participant.role ?? 'Farmer'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-3 text-sm text-gray-700">
+                {participant.email && (
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Email</p>
+                    <p className="mt-1 text-gray-900">{participant.email}</p>
+                  </div>
+                )}
+                {participant.phone && (
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Phone</p>
+                    <p className="mt-1 text-gray-900">{participant.phone}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Location</p>
+                  <p className="mt-1 text-gray-900">{participant.location}</p>
+                </div>
+                {participant.joinedDate && (
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Joined</p>
+                    <p className="mt-1 text-gray-900">{participant.joinedDate}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Farm overview</p>
+              <p className="mt-3 text-sm leading-6 text-gray-800">
+                {participant.farmDetails || 'No farm details available yet.'}
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setIsProfileOpen(false)} className="mt-4">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
