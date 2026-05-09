@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, MessageCircle } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
@@ -37,6 +37,14 @@ const formatTime = (timestamp: string) =>
     minute: '2-digit',
   });
 
+const createThreadSignature = (messagesForThread: ChatMessage[]) =>
+  messagesForThread
+    .map(
+      (message) =>
+        `${message.id}:${message.senderType}:${message.read ? '1' : '0'}:${message.timestamp}:${message.message}`
+    )
+    .join('|');
+
 const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
   const {
     currentUser,
@@ -49,6 +57,10 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(null);
+  const threadCacheRef = useRef<{ signature: string; messages: ChatMessage[] }>({
+    signature: '',
+    messages: [],
+  });
 
   const contextPartnerId = searchParams.get('partnerId');
   const contextOrderId = searchParams.get('orderId');
@@ -193,63 +205,92 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
     conversation.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const selectedConversationFromList =
-    filteredConversations.find((conversation) => conversation.id === selectedPartnerId) ??
-    filteredConversations[0] ??
-    null;
+  const selectedConversation = useMemo<ConversationSummary | null>(() => {
+    const matchedConversation =
+      filteredConversations.find((conversation) => conversation.id === selectedPartnerId) ??
+      filteredConversations[0] ??
+      null;
 
-  const selectedConversation = selectedConversationFromList
-    ? selectedConversationFromList
-    : selectedPartnerId
-    ? (() => {
-        const partnerUser = users.find((user) => user.id === selectedPartnerId);
-        if (!partnerUser) {
-          return null;
-        }
+    if (matchedConversation) {
+      return matchedConversation;
+    }
 
-        return {
-          id: partnerUser.id,
-          name: partnerUser.name,
-          location: partnerUser.location,
-          avatar: buildAvatar(partnerUser.name),
-          rating: undefined,
-          responseTime: undefined,
-          isOnline: partnerUser.role === 'farmer',
-          unreadCount: 0,
-          lastMessage: '',
-          lastMessageTime: '',
-        };
-      })()
-    : null;
+    if (!selectedPartnerId) {
+      return null;
+    }
 
-  const threadMessages: ChatMessage[] = selectedConversation
-    ? getConversationMessages(currentUser.id, selectedConversation.id).map((message) => ({
+    const partnerUser = users.find((user) => user.id === selectedPartnerId);
+    if (!partnerUser) {
+      return null;
+    }
+
+    return {
+      id: partnerUser.id,
+      name: partnerUser.name,
+      location: partnerUser.location,
+      avatar: buildAvatar(partnerUser.name),
+      rating: undefined,
+      responseTime: undefined,
+      isOnline: partnerUser.role === 'farmer',
+      unreadCount: 0,
+      lastMessage: '',
+      lastMessageTime: '',
+    };
+  }, [filteredConversations, selectedPartnerId, users]);
+
+  const threadMessages = useMemo<ChatMessage[]>(() => {
+    if (!currentUser || !selectedConversation) {
+      threadCacheRef.current = { signature: '', messages: [] };
+      return [];
+    }
+
+    const nextMessages = getConversationMessages(currentUser.id, selectedConversation.id).map(
+      (message) => ({
         id: message.id,
         sender: message.senderId === currentUser.id ? currentUser.name : message.senderName,
         senderType: message.senderId === currentUser.id ? 'user' : 'other',
         message: message.content,
         timestamp: formatTime(message.timestamp),
-        avatar: message.senderId === currentUser.id ? buildAvatar(currentUser.name) : selectedConversation.avatar,
+        avatar:
+          message.senderId === currentUser.id
+            ? buildAvatar(currentUser.name)
+            : selectedConversation.avatar,
         read: message.read,
-      }))
-    : [];
+      })
+    );
 
-  const handleSendMessage = (messageText: string) => {
-    if (!selectedConversation) {
-      return;
+    const signature = createThreadSignature(nextMessages);
+    if (threadCacheRef.current.signature === signature) {
+      return threadCacheRef.current.messages;
     }
 
-    addMessage({
-      id: `message_${Date.now()}`,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      recipientId: selectedConversation.id,
-      recipientName: selectedConversation.name,
-      content: messageText,
-      timestamp: new Date().toISOString(),
-      read: false,
-    });
-  };
+    threadCacheRef.current = {
+      signature,
+      messages: nextMessages,
+    };
+
+    return nextMessages;
+  }, [currentUser, getConversationMessages, selectedConversation]);
+
+  const handleSendMessage = useCallback(
+    (messageText: string) => {
+      if (!currentUser || !selectedConversation) {
+        return;
+      }
+
+      addMessage({
+        id: `message_${Date.now()}`,
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        recipientId: selectedConversation.id,
+        recipientName: selectedConversation.name,
+        content: messageText,
+        timestamp: new Date().toISOString(),
+        read: false,
+      });
+    },
+    [addMessage, currentUser, selectedConversation]
+  );
 
   return (
     <div className="space-y-6 pb-8">

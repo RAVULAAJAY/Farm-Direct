@@ -40,6 +40,8 @@ export const useAppState = () => {
 
     // Message operations
     addMessage: globalState.addMessage,
+    deleteMessage: globalState.deleteMessage,
+    updateMessage: globalState.updateMessage,
     getMessagesByUser: globalState.getMessagesByUser,
     markMessagesAsRead: globalState.markMessagesAsRead,
     getUnreadMessageCount: globalState.getUnreadMessageCount,

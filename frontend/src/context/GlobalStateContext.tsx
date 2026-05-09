@@ -238,6 +238,68 @@ const defaultNotifications: AppNotification[] = [];
 
 const defaultMessages: Message[] = [];
 
+const normalizeMessage = (message: Message): Message => ({
+  ...message,
+  id: String(message.id),
+  senderId: String(message.senderId),
+  senderName: String(message.senderName),
+  recipientId: String(message.recipientId),
+  recipientName: String(message.recipientName),
+  content: String(message.content),
+  timestamp: message.timestamp || new Date().toISOString(),
+  read: Boolean(message.read),
+});
+
+const normalizeMessages = (messages: Message[]) => messages.map(normalizeMessage);
+
+const mergeMessages = (localMessages: Message[], remoteMessages: Message[]) => {
+  const merged = new Map<string, Message>();
+
+  normalizeMessages(remoteMessages).forEach((message) => {
+    merged.set(message.id, message);
+  });
+
+  normalizeMessages(localMessages).forEach((message) => {
+    const existing = merged.get(message.id);
+    if (!existing) {
+      merged.set(message.id, message);
+      return;
+    }
+
+    merged.set(message.id, {
+      ...existing,
+      ...message,
+      read: existing.read || message.read,
+    });
+  });
+
+  return Array.from(merged.values()).sort(
+    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+  );
+};
+
+const isSameMessage = (left: Message, right: Message) =>
+  left.id === right.id &&
+  left.senderId === right.senderId &&
+  left.senderName === right.senderName &&
+  left.recipientId === right.recipientId &&
+  left.recipientName === right.recipientName &&
+  left.content === right.content &&
+  left.timestamp === right.timestamp &&
+  left.read === right.read;
+
+const areMessageListsEqual = (left: Message[], right: Message[]) => {
+  if (left === right) {
+    return true;
+  }
+
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((message, index) => isSameMessage(message, right[index]));
+};
+
 export interface GlobalStateContextType {
   // Auth
   currentUser: User | null;
@@ -287,6 +349,8 @@ export interface GlobalStateContextType {
   // Messages
   messages: Message[];
   addMessage: (message: Message) => void;
+  deleteMessage: (messageId: string) => void;
+  updateMessage: (messageId: string, updates: Partial<Message>) => void;
   getMessagesByUser: (userId: string) => Message[];
   getConversationMessages: (userIdA: string, userIdB: string) => Message[];
   markMessagesAsRead: (messageIds: string[]) => void;
@@ -348,7 +412,10 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<User[]>([defaultAdminUser]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const storedMessages = readStoredValue<Message[]>('messages') ?? defaultMessages;
+    return normalizeMessages(storedMessages);
+  });
 
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -362,13 +429,24 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [fetchedUsers, fetchedProducts, fetchedOrders, fetchedActivity, fetchedNotifications] = await Promise.all([
+        const [fetchedUsers, fetchedProducts, fetchedOrders, fetchedActivity, fetchedNotifications, fetchedMessages] = await Promise.all([
           api.fetchUsers(),
           api.fetchProducts(),
           api.fetchOrders(),
           api.fetchActivityLogs(),
           Promise.resolve([]), // no notifications endpoint yet
+          api.fetchMessages(),
         ]);
+
+        const storedMessages = normalizeMessages(readStoredValue<Message[]>('messages') ?? defaultMessages);
+        const remoteMessageIds = new Set(fetchedMessages.map((message) => message.id));
+        const missingMessages = storedMessages.filter((message) => !remoteMessageIds.has(message.id));
+
+        if (missingMessages.length > 0) {
+          void Promise.all(missingMessages.map((message) => api.createMessage(message))).catch((error) => {
+            console.error('Failed to sync local messages to backend', error);
+          });
+        }
 
         setUsers(fetchedUsers.length > 0 ? fetchedUsers : [defaultAdminUser]);
         setProducts((prev) => {
@@ -390,6 +468,15 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
           return fetchedActivity;
         });
         setNotifications(fetchedNotifications);
+        setMessages((prev) => {
+          const merged = mergeMessages(prev.length > 0 ? prev : storedMessages, fetchedMessages);
+          if (areMessageListsEqual(prev, merged)) {
+            return prev;
+          }
+
+          safeSetLocalStorageItem('messages', merged);
+          return merged;
+        });
       } catch (error) {
         console.error('Unable to load remote data', error);
       }
@@ -401,11 +488,12 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
     const poll = setInterval(async () => {
       try {
-        const [productsData, usersData, ordersData, activityData] = await Promise.all([
+        const [productsData, usersData, ordersData, activityData, messagesData] = await Promise.all([
           api.fetchProducts(),
           api.fetchUsers(),
           api.fetchOrders(),
           api.fetchActivityLogs(),
+          api.fetchMessages(),
         ]);
 
         const updatedProducts = productsData.map(normalizeProduct);
@@ -420,6 +508,15 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         setOrders((prev) => (isJsonEqual(prev, updatedOrders) ? prev : updatedOrders));
 
         setActivityLogs((prev) => (isJsonEqual(prev, activityData) ? prev : activityData));
+        setMessages((prev) => {
+          const merged = mergeMessages(prev, messagesData);
+          if (areMessageListsEqual(prev, merged)) {
+            return prev;
+          }
+
+          safeSetLocalStorageItem('messages', merged);
+          return merged;
+        });
       } catch (e) {
         console.warn('Polling error', e);
       }
@@ -478,7 +575,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
       if (event.key === 'messages') {
         const nextMessages = readStoredValue<Message[]>('messages') ?? [];
-        setMessages(nextMessages);
+        setMessages((prev) => (areMessageListsEqual(prev, nextMessages) ? prev : nextMessages));
         return;
       }
 
@@ -799,14 +896,6 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       return updated;
     });
 
-    setMessages((prev) => {
-      const updated = prev.filter(
-        (message) => message.senderId !== userId && message.recipientId !== userId
-      );
-      localStorage.setItem('messages', JSON.stringify(updated));
-      return updated;
-    });
-
     setFavoriteProductIds((prev) => {
       localStorage.setItem('favoriteProductIds', JSON.stringify(prev));
       return prev;
@@ -1036,8 +1125,10 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         pickupLocation: deliveryOption === 'pickup' ? deliveryInput?.pickupLocation?.trim() : undefined,
         status: 'pending',
         paymentMethod: deliveryInput?.paymentMethod,
+        paymentStatus: deliveryInput?.paymentMethod === 'cod' ? 'pending' : 'paid',
         recipientName: deliveryInput?.recipientName?.trim() ?? currentUser.name,
         orderDate: new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString(),
         buyerName: currentUser.name,
         farmerName: productInState.farmerName,
       };
@@ -1260,9 +1351,19 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
           details: `To ${message.recipientName}`,
         });
     setMessages((prev) => {
-      const updated = [...prev, message];
+      const normalizedMessage = normalizeMessage(message);
+
+      if (prev.some((existingMessage) => isSameMessage(existingMessage, normalizedMessage))) {
+        return prev;
+      }
+
+      const updated = [...prev, normalizedMessage];
       localStorage.setItem('messages', JSON.stringify(updated));
       return updated;
+    });
+
+    void api.createMessage(message).catch((error) => {
+      console.error('Failed to persist message', error);
     });
 
     addNotification({
@@ -1276,6 +1377,29 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       actionUrl: '/messages',
     });
   }, [addActivityLog, addNotification, users]);
+
+  const updateMessage = useCallback((messageId: string, updates: Partial<Message>) => {
+    setMessages((prev) => {
+      const updated = prev.map((message) => {
+        if (message.id !== messageId) {
+          return message;
+        }
+
+        return normalizeMessage({ ...message, ...updates, id: message.id });
+      });
+
+      if (areMessageListsEqual(prev, updated)) {
+        return prev;
+      }
+
+      localStorage.setItem('messages', JSON.stringify(updated));
+      return updated;
+    });
+
+    void api.updateMessageApi(messageId, updates).catch((error) => {
+      console.error('Failed to update message', error);
+    });
+  }, []);
 
   const getMessagesByUser = useCallback(
     (userId: string) =>
@@ -1297,11 +1421,39 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
   const markMessagesAsRead = useCallback((messageIds: string[]) => {
     setMessages((prev) => {
+      const targetIds = new Set(messageIds);
+      const hasUnreadTargets = prev.some((message) => targetIds.has(message.id) && !message.read);
+
+      if (!hasUnreadTargets) {
+        return prev;
+      }
+
       const updated = prev.map((m) =>
-        messageIds.includes(m.id) ? { ...m, read: true } : m
+        targetIds.has(m.id) ? { ...m, read: true } : m
       );
       localStorage.setItem('messages', JSON.stringify(updated));
       return updated;
+    });
+
+    void Promise.all(messageIds.map((messageId) => api.updateMessageApi(messageId, { read: true }))).catch((error) => {
+      console.error('Failed to persist read state', error);
+    });
+  }, []);
+
+  const deleteMessage = useCallback((messageId: string) => {
+    setMessages((prev) => {
+      const updated = prev.filter((message) => message.id !== messageId);
+
+      if (updated.length === prev.length) {
+        return prev;
+      }
+
+      localStorage.setItem('messages', JSON.stringify(updated));
+      return updated;
+    });
+
+    void api.deleteMessageApi(messageId).catch((error) => {
+      console.error('Failed to delete message', error);
     });
   }, []);
 
@@ -1432,6 +1584,8 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     // Messages
     messages,
     addMessage,
+    deleteMessage,
+    updateMessage,
     getMessagesByUser,
     getConversationMessages,
     markMessagesAsRead,

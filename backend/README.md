@@ -34,6 +34,12 @@ The server will run on `http://localhost:4000`
 - `GET /api/orders` - Get all orders
 - `POST /api/orders` - Create an order
 
+### Messages
+- `GET /api/messages` - Get all chat messages
+- `POST /api/messages` - Create or upsert a chat message
+- `PUT /api/messages/:id` - Update a chat message, including read state
+- `DELETE /api/messages/:id` - Delete a chat message manually
+
 ### Activity
 - `GET /api/activity` - Get activity logs
 - `POST /api/activity` - Log an activity
@@ -44,6 +50,7 @@ The backend uses JSON files for data storage:
 - `data/users.json` - User accounts
 - `data/products.json` - Product listings
 - `data/orders.json` - Order records
+- `data/messages.json` - Chat history
 - `data/activityLogs.json` - Activity logs
 
 ## Dependencies

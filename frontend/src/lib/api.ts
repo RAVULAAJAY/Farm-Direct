@@ -1,4 +1,4 @@
-import { Product, ProductReview, User, Order } from '@/lib/data';
+import { Product, ProductReview, User, Order, Message } from '@/lib/data';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:4000/api';
 
@@ -32,6 +32,13 @@ export const addProductReview = (productId: string, review: Omit<ProductReview, 
 export const fetchOrders = () => request<Order[]>('/orders');
 export const createOrder = (order: Omit<Order, 'id' | 'orderDate' | 'status' | 'deliveryStatus'>) => request<Order>('/orders', { method: 'POST', body: JSON.stringify(order) });
 export const updateOrderApi = (id: string, updates: Partial<Order>) => request<Order>(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
+
+export const fetchMessages = () => request<Message[]>('/messages');
+export const createMessage = (message: Omit<Message, 'id'> & { id?: string }) =>
+  request<Message>('/messages', { method: 'POST', body: JSON.stringify(message) });
+export const updateMessageApi = (id: string, updates: Partial<Message>) =>
+  request<Message>(`/messages/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
+export const deleteMessageApi = (id: string) => request<{ success: boolean }>(`/messages/${id}`, { method: 'DELETE' });
 
 // Auth endpoints
 export const loginUser = (email: string, password: string) => request<Record<string, any>>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });

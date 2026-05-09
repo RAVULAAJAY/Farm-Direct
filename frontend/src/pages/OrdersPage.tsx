@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
+import InvoiceModal from '@/components/Orders/InvoiceModal';
 import {
   Clock,
   CheckCircle,
@@ -95,9 +96,10 @@ const statusConfig: Record<OrderStatus, { label: string; color: string; icon: Re
 const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { orders, products, updateOrder, addProductReview, addNotification, addMessage } = useGlobalState();
+  const { users, orders, products, updateOrder, addProductReview, addNotification, addMessage } = useGlobalState();
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showOrderDetail, setShowOrderDetail] = useState(false);
+  const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<Order | null>(null);
   const [ratingOrder, setRatingOrder] = useState<Order | null>(null);
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
@@ -130,6 +132,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const handleViewDetails = (order: Order) => {
     setSelectedOrder(order);
     setShowOrderDetail(true);
+  };
+
+  const handleViewInvoice = (order: Order) => {
+    setSelectedInvoiceOrder(order);
   };
 
   useEffect(() => {
@@ -260,6 +266,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
 
     navigate(`/messages?${query.toString()}`);
   };
+
+  const selectedInvoiceBuyer = selectedInvoiceOrder ? users.find((entry) => entry.id === selectedInvoiceOrder.buyerId) ?? null : null;
+  const selectedInvoiceFarmer = selectedInvoiceOrder ? users.find((entry) => entry.id === selectedInvoiceOrder.farmerId) ?? null : null;
+  const selectedInvoiceProduct = selectedInvoiceOrder ? products.find((entry) => entry.id === selectedInvoiceOrder.productId) ?? null : null;
 
   const handleOpenDeliveryTracking = (order: Order) => {
     const query = new URLSearchParams({ orderId: order.id });
@@ -467,12 +477,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       <MessageSquare className="h-4 w-4" />
                       Message
                     </Button>
-                    {order.status === 'delivered' && (
-                      <Button variant="outline" size="sm" className="gap-2">
-                        <Download className="h-4 w-4" />
-                        Invoice
-                      </Button>
-                    )}
+                    <Button variant="outline" size="sm" className="gap-2" onClick={() => handleViewInvoice(order)}>
+                      <Download className="h-4 w-4" />
+                      Invoice
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -515,6 +523,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       <Button variant="outline" onClick={() => handleOpenOrderChat(order)} className="gap-2">
                         <MessageSquare className="h-4 w-4" />
                         Message
+                      </Button>
+                      <Button variant="outline" onClick={() => handleViewInvoice(order)} className="gap-2">
+                        <Download className="h-4 w-4" />
+                        Invoice
                       </Button>
                       {isFarmer && (
                         <Button variant="outline" onClick={() => handleAcceptOrder(order)} className="gap-2">
@@ -569,6 +581,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       <Button variant="outline" onClick={() => handleOpenOrderChat(order)} className="gap-2">
                         <MessageSquare className="h-4 w-4" />
                         Message
+                      </Button>
+                      <Button variant="outline" onClick={() => handleViewInvoice(order)} className="gap-2">
+                        <Download className="h-4 w-4" />
+                        Invoice
                       </Button>
                       {isFarmer && (
                         <Button
@@ -632,6 +648,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                         <MessageSquare className="h-4 w-4" />
                         Message
                       </Button>
+                      <Button variant="outline" onClick={() => handleViewInvoice(order)} className="gap-2">
+                        <Download className="h-4 w-4" />
+                        Invoice
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
@@ -674,6 +694,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                         <MessageSquare className="h-4 w-4" />
                         Message
                       </Button>
+                      <Button variant="outline" onClick={() => handleViewInvoice(order)} className="gap-2">
+                        <Download className="h-4 w-4" />
+                        Invoice
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
@@ -714,6 +738,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
               <Button variant="outline" className="w-full" onClick={() => handleOpenDeliveryTracking(selectedOrder)}>
                 <Truck className="mr-2 h-4 w-4" />
                 Open Delivery Tracking
+              </Button>
+              <Button variant="outline" className="w-full" onClick={() => handleViewInvoice(selectedOrder)}>
+                <Download className="mr-2 h-4 w-4" />
+                View Invoice
               </Button>
               {isBuyer && selectedOrder.status === 'delivered' && (
                 <Button variant="outline" className="w-full" onClick={() => handleOpenRatingDialog(selectedOrder)}>
@@ -832,6 +860,15 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <InvoiceModal
+        open={Boolean(selectedInvoiceOrder)}
+        onOpenChange={(open) => !open && setSelectedInvoiceOrder(null)}
+        order={selectedInvoiceOrder}
+        buyer={selectedInvoiceBuyer}
+        farmer={selectedInvoiceFarmer}
+        product={selectedInvoiceProduct}
+      />
     </div>
   );
 };

@@ -64,7 +64,9 @@ export interface Order {
   paymentMethod?: 'upi' | 'card' | 'cod';
   paidAmount?: number;
   paymentReference?: string;
+  paymentStatus?: 'paid' | 'pending' | 'failed' | 'refunded';
   orderDate: string;
+  createdAt?: string;
   deliveryDate?: string;
   recipientName?: string;
   buyerName: string;

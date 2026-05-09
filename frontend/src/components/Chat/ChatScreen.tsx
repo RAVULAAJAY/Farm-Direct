@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,12 @@ interface ChatScreenProps {
   onBack?: () => void;
 }
 
+const BOTTOM_THRESHOLD_PX = 96;
+
+const isNearBottom = (element: HTMLDivElement) => {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_THRESHOLD_PX;
+};
+
 const ChatScreen: React.FC<ChatScreenProps> = ({
   participant,
   messages,
@@ -39,11 +45,81 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   contextInfo,
   onBack,
 }) => {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const previousLayoutRef = useRef({
+    conversationId: participant.id,
+    messageCount: messages.length,
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  });
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const element = scrollContainerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const handleScroll = () => {
+      previousLayoutRef.current = {
+        ...previousLayoutRef.current,
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+      };
+    };
+
+    handleScroll();
+    element.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      element.removeEventListener('scroll', handleScroll);
+    };
+  }, [participant.id]);
+
+  useLayoutEffect(() => {
+    const element = scrollContainerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const previous = previousLayoutRef.current;
+    const nextLastMessage = messages[messages.length - 1];
+    const conversationChanged = previous.conversationId !== participant.id;
+    const distanceFromBottom =
+      previous.scrollHeight - previous.scrollTop - previous.clientHeight;
+    const shouldStickToBottom =
+      conversationChanged ||
+      previous.messageCount === 0 ||
+      nextLastMessage?.senderType === 'user' ||
+      distanceFromBottom <= BOTTOM_THRESHOLD_PX;
+
+    if (shouldStickToBottom) {
+      const behavior = conversationChanged || previous.messageCount === 0 ? 'auto' : 'smooth';
+      element.scrollTo({ top: element.scrollHeight, behavior });
+    } else if (
+      previous.messageCount !== messages.length ||
+      previous.scrollHeight !== element.scrollHeight
+    ) {
+      const heightDelta = element.scrollHeight - previous.scrollHeight;
+      element.scrollTop = Math.max(0, previous.scrollTop + heightDelta);
+    }
+
+    previousLayoutRef.current = {
+      conversationId: participant.id,
+      messageCount: messages.length,
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  }, [messages, participant.id]);
+
+  const handleSendMessage = useCallback(
+    (message: string) => {
+      onSendMessage(message);
+    },
+    [onSendMessage]
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
@@ -111,7 +187,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-gray-50 p-4">
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-gray-50 p-4">
         {contextInfo && (
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
             {contextInfo}
@@ -124,11 +200,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             <p className="text-sm text-gray-500">No messages yet. Start the conversation.</p>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       <MessageInput
-        onSendMessage={onSendMessage}
+        onSendMessage={handleSendMessage}
         placeholder={`Message ${participant.name}...`}
         initialValue={initialMessage}
       />
@@ -136,4 +211,4 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   );
 };
 
-export default ChatScreen;
+export default React.memo(ChatScreen);

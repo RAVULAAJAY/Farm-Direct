@@ -9,6 +9,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
+const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const ACTIVITY_FILE = path.join(DATA_DIR, 'activityLogs.json');
 
 function ensureDataDir(){
@@ -24,11 +25,26 @@ function saveData(filePath, data){
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+function normalizeMessage(message) {
+  return {
+    ...message,
+    id: String(message.id || uuidv4()),
+    senderId: String(message.senderId || ''),
+    senderName: String(message.senderName || ''),
+    recipientId: String(message.recipientId || ''),
+    recipientName: String(message.recipientName || ''),
+    content: String(message.content || ''),
+    timestamp: message.timestamp || new Date().toISOString(),
+    read: Boolean(message.read),
+  };
+}
+
 ensureDataDir();
 
 let users = loadData(USERS_FILE);
 let products = loadData(PRODUCTS_FILE);
 let orders = loadData(ORDERS_FILE);
+let messages = loadData(MESSAGES_FILE).map(normalizeMessage);
 let activityLogs = loadData(ACTIVITY_FILE);
 
 // Environment / config
@@ -169,12 +185,79 @@ app.delete('/api/products/:id', (req, res) => {
 
 app.get('/api/orders', (req, res) => res.json(orders));
 app.post('/api/orders', (req, res) => {
-  const order = { id: uuidv4(), ...req.body, orderDate: new Date().toISOString(), status: 'pending', deliveryStatus: 'pending' };
+  const order = {
+    id: uuidv4(),
+    ...req.body,
+    orderDate: new Date().toISOString().split('T')[0],
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    deliveryStatus: 'pending',
+    paymentStatus: req.body.paymentStatus || (req.body.paymentMethod === 'cod' ? 'pending' : 'paid'),
+  };
   orders.push(order);
   saveData(ORDERS_FILE, orders);
   activityLogs.unshift({ id: uuidv4(), userId: order.buyerId, userName: order.buyerName, userRole: 'buyer', action: 'placed order', targetId: order.id, targetType: 'order', timestamp: new Date().toISOString() });
   saveData(ACTIVITY_FILE, activityLogs);
   res.status(201).json(order);
+});
+
+// Messages
+app.get('/api/messages', (req, res) => res.json(messages));
+app.post('/api/messages', (req, res) => {
+  const incoming = normalizeMessage(req.body || {});
+  const sender = users.find((entry) => entry.id === incoming.senderId);
+  const idx = messages.findIndex((entry) => entry.id === incoming.id);
+
+  if (idx >= 0) {
+    messages[idx] = { ...messages[idx], ...incoming };
+    saveData(MESSAGES_FILE, messages);
+    return res.status(200).json(messages[idx]);
+  }
+
+  messages.push(incoming);
+  saveData(MESSAGES_FILE, messages);
+  activityLogs.unshift({
+    id: uuidv4(),
+    userId: incoming.senderId,
+    userName: incoming.senderName,
+    userRole: sender?.role || 'buyer',
+    action: 'sent message',
+    targetId: incoming.id,
+    targetType: 'message',
+    details: `To ${incoming.recipientName}`,
+    timestamp: new Date().toISOString(),
+  });
+  saveData(ACTIVITY_FILE, activityLogs);
+  res.status(201).json(incoming);
+});
+app.put('/api/messages/:id', (req, res) => {
+  const idx = messages.findIndex((entry) => entry.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'Message not found' });
+
+  messages[idx] = normalizeMessage({ ...messages[idx], ...req.body, id: messages[idx].id });
+  saveData(MESSAGES_FILE, messages);
+  res.json(messages[idx]);
+});
+app.delete('/api/messages/:id', (req, res) => {
+  const idx = messages.findIndex((entry) => entry.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'Message not found' });
+
+  const removed = messages.splice(idx, 1)[0];
+  const sender = users.find((entry) => entry.id === removed.senderId);
+  saveData(MESSAGES_FILE, messages);
+  activityLogs.unshift({
+    id: uuidv4(),
+    userId: removed.senderId,
+    userName: removed.senderName,
+    userRole: sender?.role || 'buyer',
+    action: 'deleted message',
+    targetId: removed.id,
+    targetType: 'message',
+    details: `To ${removed.recipientName}`,
+    timestamp: new Date().toISOString(),
+  });
+  saveData(ACTIVITY_FILE, activityLogs);
+  res.json({ success: true });
 });
 
 // Auth: login
