@@ -669,8 +669,9 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
 
       await upsertUser(user);
       onSuccess(user);
-    } catch {
-      setGeneralError('An error occurred while submitting the form. Please try again.');
+    } catch (error) {
+      console.error('Auth form submission error:', error);
+      setGeneralError(error instanceof Error ? error.message : 'An error occurred while submitting the form. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
