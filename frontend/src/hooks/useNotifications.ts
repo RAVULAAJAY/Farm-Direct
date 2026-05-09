@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { initSocket, joinUserRoom, on, off } from '@/lib/socket';
 import { useGlobalState } from '@/context/GlobalStateContext';
+import { useToast } from '@/hooks/use-toast';
 
 export default function useNotifications() {
   const {
@@ -10,6 +11,7 @@ export default function useNotifications() {
     addMessage: addMessageToState,
     markNotificationAsRead,
   } = useGlobalState();
+  const { toast } = useToast();
 
   useEffect(() => {
     const socket = initSocket();
@@ -18,6 +20,12 @@ export default function useNotifications() {
     const handleNewNotification = (payload: any) => {
       try {
         addNotification(payload);
+        // Show toast for new notification
+        toast({
+          title: payload.title,
+          description: payload.message,
+          duration: 5000,
+        });
       } catch (e) {
         console.error('Failed to add notification', e);
       }
@@ -42,6 +50,12 @@ export default function useNotifications() {
     const handleMessageNew = (message: any) => {
       try {
         addMessageToState(message);
+        // Show toast for new message
+        toast({
+          title: 'New Message',
+          description: `From ${message.senderName}: ${message.content}`,
+          duration: 5000,
+        });
         if (message && message.senderId) {
           addActivityLog({
             userId: message.senderId,
@@ -85,6 +99,6 @@ export default function useNotifications() {
       off('message:new', handleMessageNew);
       off('cart:update', handleCartUpdate);
     };
-  }, [currentUser, addNotification, addActivityLog, addMessageToState, markNotificationAsRead]);
+  }, [currentUser, addNotification, addActivityLog, addMessageToState, markNotificationAsRead, toast]);
 }
 

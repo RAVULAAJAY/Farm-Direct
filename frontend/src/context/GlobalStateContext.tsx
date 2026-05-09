@@ -222,7 +222,7 @@ const normalizeOrder = (order: Order): Order => {
   };
 };
 
-export type NotificationType = 'order' | 'message' | 'update';
+export type NotificationType = 'order' | 'message' | 'update' | 'review';
 
 export interface AppNotification {
   id: string;

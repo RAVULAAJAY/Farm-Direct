@@ -179,6 +179,21 @@ app.post('/api/products/:id/reviews', (req, res) => {
 
   saveData(PRODUCTS_FILE, products);
 
+  // Create notification for farmer
+  const notif = {
+    id: uuidv4(),
+    userId: currentProduct.farmerId,
+    type: 'review',
+    title: 'New Product Review',
+    message: `${req.body.userName} reviewed your product "${currentProduct.name}" with ${review.rating} stars`,
+    timestamp: new Date().toISOString(),
+    read: false,
+    actionUrl: `/product/${currentProduct.id}`,
+  };
+  notifications.push(notif);
+  saveNotifications(notifications);
+  if (io) io.to(`user_${currentProduct.farmerId}`).emit('notification:new', notif);
+
   res.status(201).json(products[idx]);
 });
 app.delete('/api/products/:id', (req, res) => {
@@ -448,8 +463,58 @@ app.put('/api/orders/:id', (req, res) => {
   if (idx < 0) return res.status(404).json({ error: 'Order not found' });
 
   // Merge updates
+  const oldStatus = orders[idx].status;
   orders[idx] = { ...orders[idx], ...req.body };
+  const newStatus = orders[idx].status;
   saveData(ORDERS_FILE, orders);
+
+  // Create notification if status changed
+  if (oldStatus !== newStatus && newStatus) {
+    const order = orders[idx];
+    let targetUserId, title, message, actionUrl;
+    if (newStatus === 'accepted') {
+      targetUserId = order.buyerId;
+      title = 'Order Accepted';
+      message = `Your order for "${order.productName}" has been accepted by ${order.farmerName}`;
+      actionUrl = `/orders/${order.id}`;
+    } else if (newStatus === 'shipped') {
+      targetUserId = order.buyerId;
+      title = 'Order Shipped';
+      message = `Your order for "${order.productName}" has been shipped`;
+      actionUrl = `/orders/${order.id}`;
+    } else if (newStatus === 'delivered') {
+      targetUserId = order.buyerId;
+      title = 'Order Delivered';
+      message = `Your order for "${order.productName}" has been delivered`;
+      actionUrl = `/orders/${order.id}`;
+    } else if (newStatus === 'cancelled') {
+      targetUserId = order.buyerId;
+      title = 'Order Cancelled';
+      message = `Your order for "${order.productName}" has been cancelled`;
+      actionUrl = `/orders/${order.id}`;
+    } else if (newStatus === 'paid') {
+      targetUserId = order.farmerId;
+      title = 'Payment Received';
+      message = `Payment received for order "${order.productName}"`;
+      actionUrl = `/orders/${order.id}`;
+    }
+
+    if (targetUserId && title) {
+      const notif = {
+        id: uuidv4(),
+        userId: targetUserId,
+        type: 'order',
+        title,
+        message,
+        timestamp: new Date().toISOString(),
+        read: false,
+        actionUrl,
+      };
+      notifications.push(notif);
+      saveNotifications(notifications);
+      if (io) io.to(`user_${targetUserId}`).emit('notification:new', notif);
+    }
+  }
 
   // Log activity (best-effort)
   try {
