@@ -108,7 +108,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const isFarmer = user.role === 'farmer';
   const isBuyer = user.role === 'buyer';
   const activeUserId = currentUser?.id ?? user.id;
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const buyerOrders = useMemo(
     () => orders.filter((order) => order.buyerId === activeUserId),
@@ -119,6 +119,16 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
     () => orders.filter((order) => order.farmerId === activeUserId),
     [activeUserId, orders]
   );
+
+  const handleCloseOrderDetail = () => {
+    setShowOrderDetail(false);
+
+    if (searchParams.has('orderId')) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('orderId');
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
 
   const visibleOrders = isFarmer ? farmerOrders : buyerOrders;
 
@@ -168,7 +178,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
 
     if (!latestSelectedOrder) {
       setSelectedOrder(null);
-      setShowOrderDetail(false);
+      handleCloseOrderDetail();
       return;
     }
 
@@ -746,7 +756,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={showOrderDetail} onOpenChange={setShowOrderDetail}>
+      <Dialog open={showOrderDetail} onOpenChange={(open) => !open && handleCloseOrderDetail()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Order Details</DialogTitle>
@@ -791,7 +801,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                   {selectedOrder.status === 'pending' && (
                     <Button className="w-full" onClick={() => {
                       handleAcceptOrder(selectedOrder);
-                      setShowOrderDetail(false);
+                      handleCloseOrderDetail();
                     }}>
                       Accept Order
                     </Button>
@@ -801,7 +811,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       className="w-full"
                       onClick={() => {
                         handleMarkOutForDelivery(selectedOrder);
-                        setShowOrderDetail(false);
+                        handleCloseOrderDetail();
                       }}
                       disabled={selectedOrder.deliveryOption !== 'delivery' || selectedOrder.deliveryStatus === 'out-for-delivery' || selectedOrder.deliveryStatus === 'delivered'}
                     >
@@ -811,7 +821,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                   {isAcceptedPipelineStatus(selectedOrder.status) && (
                     <Button className="w-full" onClick={() => {
                       handleMarkDelivered(selectedOrder);
-                      setShowOrderDetail(false);
+                      handleCloseOrderDetail();
                     }}>
                       {selectedOrder.deliveryOption === 'pickup' ? 'Mark Picked Up' : 'Mark as Delivered'}
                     </Button>
@@ -822,7 +832,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       className="w-full"
                       onClick={() => {
                         handleRejectOrder(selectedOrder);
-                        setShowOrderDetail(false);
+                        handleCloseOrderDetail();
                       }}
                     >
                       Reject Order

@@ -117,7 +117,7 @@ const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center gap-3 flex-shrink-0 group cursor-pointer hover:opacity-80 transition-opacity">
           <BrandLogo
             imageClassName="h-12 w-12 sm:h-14 sm:w-14 transform transition-transform duration-300 group-hover:scale-110"
-            textClassName="text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent hidden sm:inline"
+            textClassName="text-xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent hidden sm:inline"
           />
         </div>
 

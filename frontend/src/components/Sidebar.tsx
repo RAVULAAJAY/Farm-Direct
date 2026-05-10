@@ -144,10 +144,10 @@ const Sidebar: React.FC<SidebarProps> = ({
       >
         <div className="h-full flex flex-col overflow-y-auto scroll-smooth">
           {/* Header */}
-          <div className="p-6 border-b border-gray-100 flex items-center justify-between group">
+          <div className="h-16 border-b border-gray-100 flex items-center justify-between px-6 group">
             <div className="flex items-center gap-3">
               <BrandLogo
-                imageClassName="h-12 w-12 sm:h-14 sm:w-14 transform transition-transform group-hover:scale-110"
+                imageClassName="h-12 w-12 sm:h-14 sm:w-14 transform transition-transform duration-300 group-hover:scale-110"
                 textClassName="text-xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent"
               />
             </div>
