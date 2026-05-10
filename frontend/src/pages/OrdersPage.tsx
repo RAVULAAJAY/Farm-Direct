@@ -293,6 +293,10 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const selectedInvoiceProduct = selectedInvoiceOrder ? products.find((entry) => entry.id === selectedInvoiceOrder.productId) ?? null : null;
 
   const handleOpenDeliveryTracking = (order: Order) => {
+    if (isFarmer) {
+      return;
+    }
+
     const query = new URLSearchParams({ orderId: order.id });
     navigate(`/delivery?${query.toString()}`);
   };
@@ -490,10 +494,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                         Reject Order
                       </Button>
                     )}
-                    <Button variant="outline" size="sm" className="gap-2" onClick={() => handleOpenDeliveryTracking(order)}>
-                      <Truck className="h-4 w-4" />
-                      Track Delivery
-                    </Button>
+                    {!isFarmer && (
+                      <Button variant="outline" size="sm" className="gap-2" onClick={() => handleOpenDeliveryTracking(order)}>
+                        <Truck className="h-4 w-4" />
+                        Track Delivery
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" className="gap-2" onClick={() => handleOpenOrderChat(order)}>
                       <MessageSquare className="h-4 w-4" />
                       Message
@@ -537,10 +543,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                           Rate Farmer
                         </Button>
                       )}
-                      <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
-                        <Truck className="h-4 w-4" />
-                        Track Delivery
-                      </Button>
+                      {!isFarmer && (
+                        <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
+                          <Truck className="h-4 w-4" />
+                          Track Delivery
+                        </Button>
+                      )}
                       <Button variant="outline" onClick={() => handleOpenOrderChat(order)} className="gap-2">
                         <MessageSquare className="h-4 w-4" />
                         Message
@@ -595,10 +603,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       <Button onClick={() => handleViewDetails(order)} className="gap-2">
                         View Details
                       </Button>
-                      <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
-                        <Truck className="h-4 w-4" />
-                        Track Delivery
-                      </Button>
+                      {!isFarmer && (
+                        <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
+                          <Truck className="h-4 w-4" />
+                          Track Delivery
+                        </Button>
+                      )}
                       <Button variant="outline" onClick={() => handleOpenOrderChat(order)} className="gap-2">
                         <MessageSquare className="h-4 w-4" />
                         Message
@@ -661,10 +671,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       <Button onClick={() => handleViewDetails(order)} className="gap-2">
                         View Details
                       </Button>
-                      <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
-                        <Truck className="h-4 w-4" />
-                        Track Delivery
-                      </Button>
+                      {!isFarmer && (
+                        <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
+                          <Truck className="h-4 w-4" />
+                          Track Delivery
+                        </Button>
+                      )}
                       <Button variant="outline" onClick={() => handleOpenOrderChat(order)} className="gap-2">
                         <MessageSquare className="h-4 w-4" />
                         Message
@@ -707,10 +719,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       <Button onClick={() => handleViewDetails(order)} className="gap-2">
                         View Details
                       </Button>
-                      <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
-                        <Truck className="h-4 w-4" />
-                        Track Delivery
-                      </Button>
+                      {!isFarmer && (
+                        <Button variant="outline" onClick={() => handleOpenDeliveryTracking(order)} className="gap-2">
+                          <Truck className="h-4 w-4" />
+                          Track Delivery
+                        </Button>
+                      )}
                       <Button variant="outline" onClick={() => handleOpenOrderChat(order)} className="gap-2">
                         <MessageSquare className="h-4 w-4" />
                         Message
@@ -756,10 +770,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                   <p><span className="font-medium">Payment Ref:</span> {selectedOrder.paymentReference}</p>
                 )}
               </div>
-              <Button variant="outline" className="w-full" onClick={() => handleOpenDeliveryTracking(selectedOrder)}>
-                <Truck className="mr-2 h-4 w-4" />
-                Open Delivery Tracking
-              </Button>
+              {!isFarmer && (
+                <Button variant="outline" className="w-full" onClick={() => handleOpenDeliveryTracking(selectedOrder)}>
+                  <Truck className="mr-2 h-4 w-4" />
+                  Open Delivery Tracking
+                </Button>
+              )}
               <Button variant="outline" className="w-full" onClick={() => handleViewInvoice(selectedOrder)}>
                 <Download className="mr-2 h-4 w-4" />
                 View Invoice

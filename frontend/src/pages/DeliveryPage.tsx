@@ -1,20 +1,27 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import DeliveryOptions, { DeliveryMethod, DeliveryDetails } from '@/components/Delivery/DeliveryOptions';
 import DeliveryStatus, { DeliveryStatusData, DeliveryStatus as DeliveryStatusType } from '@/components/Delivery/DeliveryStatus';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useGlobalState } from '@/context/GlobalStateContext';
 import { Order } from '@/lib/data';
 
 const DeliveryPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('options');
+  const [activeTab, setActiveTab] = useState('history');
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { orders, users, updateOrder } = useGlobalState();
+  const isFarmer = currentUser?.role === 'farmer';
+  const { orders, users } = useGlobalState();
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
+
+  useEffect(() => {
+    if (isFarmer && activeTab === 'status') {
+      setActiveTab('history');
+    }
+  }, [activeTab, isFarmer]);
 
   const userOrders = useMemo(() => {
     if (!currentUser) {
@@ -141,25 +148,13 @@ const DeliveryPage: React.FC = () => {
     };
   };
 
-  const handleDeliveryMethodSelect = (method: DeliveryMethod, details: DeliveryDetails) => {
-    if (!selectedOrder) {
-      return;
-    }
-
-    const isPickup = method === 'self-pickup';
-
-    updateOrder(selectedOrder.id, {
-      deliveryOption: isPickup ? 'pickup' : 'delivery',
-      deliveryStatus: isPickup ? 'ready-for-pickup' : 'pending',
-      pickupLocation: isPickup ? details.pickupLocation : undefined,
-      deliveryAddress: !isPickup ? details.deliveryAddress : undefined,
-    });
-
-    setActiveTab('status');
-  };
-
   const handleContactFarmer = () => {
     alert('Calling farmer...');
+  };
+
+  const handleOrderIdClick = (orderId: string) => {
+    const query = new URLSearchParams({ orderId });
+    navigate(`/orders?${query.toString()}`);
   };
 
   return (
@@ -167,72 +162,36 @@ const DeliveryPage: React.FC = () => {
       <div className="max-w-4xl mx-auto">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Delivery Management</h1>
-          <p className="text-gray-600">Choose delivery method and track your orders</p>
+          <p className="text-gray-600">Track your orders</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="options">Delivery Options</TabsTrigger>
-            <TabsTrigger value="status">Track Order</TabsTrigger>
+          <TabsList className={`grid w-full ${isFarmer ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            {!isFarmer && <TabsTrigger value="status">Track Order</TabsTrigger>}
             <TabsTrigger value="history">Delivery History</TabsTrigger>
           </TabsList>
 
-          {/* Delivery Options Tab */}
-          <TabsContent value="options" className="space-y-4">
-            {userOrders.length === 0 ? (
-              <Card className="p-8 text-center text-gray-600">
-                You have no orders yet. Place an order first to choose pickup or delivery.
-              </Card>
-            ) : (
-              <Card className="p-6 space-y-4">
-                <div>
-                  <p className="text-sm font-medium text-gray-700 mb-2">Choose Order</p>
-                  <select
-                    value={selectedOrderId}
-                    onChange={(event) => setSelectedOrderId(event.target.value)}
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
-                  >
-                    {userOrders.map((order) => (
-                      <option key={order.id} value={order.id}>
-                        {order.id} - {order.productName} ({order.status})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {selectedOrder && (
-                  <div className="rounded-md border bg-gray-50 p-3 text-sm text-gray-700">
-                    <p><strong>Current:</strong> {selectedOrder.deliveryOption === 'pickup' ? 'Pickup' : 'Delivery'}</p>
-                    <p><strong>Delivery Status:</strong> {selectedOrder.deliveryStatus}</p>
-                  </div>
-                )}
-
-                <DeliveryOptions
-                  onDeliveryMethodSelect={handleDeliveryMethodSelect}
-                  selectedMethod={selectedOrder?.deliveryOption === 'pickup' ? 'self-pickup' : 'farmer-delivery'}
-                />
-              </Card>
-            )}
-          </TabsContent>
-
           {/* Track Order Tab */}
-          <TabsContent value="status" className="space-y-4">
-            {selectedOrder ? (
-              <Card className="p-6">
-                <DeliveryStatus
-                  delivery={getDeliveryData(selectedOrder)}
-                  onContactFarmer={handleContactFarmer}
-                />
-              </Card>
-            ) : (
-              <Card className="p-12 text-center">
-                <p className="text-gray-600 mb-4">No order selected for tracking</p>
-                <Button onClick={() => setActiveTab('options')} className="bg-blue-600 hover:bg-blue-700">
-                  Choose an Order
-                </Button>
-              </Card>
-            )}
-          </TabsContent>
+          {!isFarmer && (
+            <TabsContent value="status" className="space-y-4">
+              {selectedOrder ? (
+                <Card className="p-6">
+                  <DeliveryStatus
+                    delivery={getDeliveryData(selectedOrder)}
+                    onContactFarmer={handleContactFarmer}
+                    onOrderIdClick={handleOrderIdClick}
+                  />
+                </Card>
+              ) : (
+                <Card className="p-12 text-center">
+                  <p className="text-gray-600 mb-4">No order selected for tracking</p>
+                  <Button onClick={() => setActiveTab('history')} className="bg-blue-600 hover:bg-blue-700">
+                    View History
+                  </Button>
+                </Card>
+              )}
+            </TabsContent>
+          )}
 
           {/* Delivery History Tab */}
           <TabsContent value="history" className="space-y-4">
@@ -246,6 +205,7 @@ const DeliveryPage: React.FC = () => {
                         <DeliveryStatus
                           delivery={getDeliveryData(order)}
                           onContactFarmer={handleContactFarmer}
+                          onOrderIdClick={handleOrderIdClick}
                         />
                       </Card>
                     ))}
@@ -262,6 +222,7 @@ const DeliveryPage: React.FC = () => {
                         <DeliveryStatus
                           delivery={getDeliveryData(order)}
                           onContactFarmer={handleContactFarmer}
+                          onOrderIdClick={handleOrderIdClick}
                         />
                       </Card>
                     ))}

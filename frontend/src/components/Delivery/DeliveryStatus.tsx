@@ -30,11 +30,13 @@ export interface DeliveryStatusData {
 interface DeliveryStatusProps {
   delivery: DeliveryStatusData;
   onContactFarmer?: () => void;
+  onOrderIdClick?: (orderId: string) => void;
 }
 
 const DeliveryStatus: React.FC<DeliveryStatusProps> = ({
   delivery,
-  onContactFarmer
+  onContactFarmer,
+  onOrderIdClick
 }) => {
   const [progressPercent, setProgressPercent] = useState(0);
 
@@ -85,7 +87,12 @@ const DeliveryStatus: React.FC<DeliveryStatusProps> = ({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-white text-lg font-semibold">Your Delivery Status</h3>
-            <p className="text-blue-100 text-sm mt-1">Order #{delivery.orderId}</p>
+            <button
+              onClick={() => onOrderIdClick?.(delivery.orderId)}
+              className="text-blue-100 text-sm mt-1 hover:text-white hover:underline cursor-pointer transition-colors"
+            >
+              Order #{delivery.orderId}
+            </button>
           </div>
           <div className="bg-white/20 p-3 rounded-full">
             <CurrentStatusIcon className="h-8 w-8 text-white" />
