@@ -7,12 +7,42 @@ const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
+// Initialize SMTP transporter once (reuse for all emails)
+let smtpTransporter = null;
+const SMTP_HOST = process.env.SMTP_HOST;
+if (SMTP_HOST) {
+  try {
+    const nodemailer = require('nodemailer');
+    smtpTransporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      connectionTimeout: 10000,
+      socketTimeout: 10000,
+    });
+
+    smtpTransporter.verify().then(() => {
+      console.log(`[SMTP] Connected to ${SMTP_HOST}`);
+    }).catch((err) => {
+      console.warn(`[SMTP] Verification failed: ${err && err.message ? err.message : err}`);
+      smtpTransporter = null;
+    });
+  } catch (e) {
+    console.warn('[SMTP] Initialization failed, emails will be logged to console', e && e.message ? e.message : e);
+    smtpTransporter = null;
+  }
+} else {
+  console.log('[SMTP] Not configured - outgoing emails will be logged to the server console');
+}
+
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const ACTIVITY_FILE = path.join(DATA_DIR, 'activityLogs.json');
+const OTPS_FILE = path.join(DATA_DIR, 'otps.json');
 
 function ensureDataDir(){
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
@@ -68,35 +98,229 @@ async function sendPasswordResetEmail({ email, resetLink }) {
     console.log(`[Password Reset] SMTP not configured, reset link: ${resetLink}`);
     return false;
   }
+  if (smtpTransporter) {
+    try {
+      console.log(`[Password Reset] Sending email to ${email} via configured SMTP...`);
+      const info = await smtpTransporter.sendMail({
+        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        to: email,
+        subject: 'Password reset request',
+        text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
+        html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
+      });
+      console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${info.messageId}`);
+      return true;
+    } catch (e) {
+      console.warn(`[Password Reset] SMTP error: ${e?.message || e}. Falling back to console log.`);
+      console.log(`[Password Reset] Reset link for ${email}: ${resetLink}`);
+      return false;
+    }
+  }
 
-  try {
-    console.log(`[Password Reset] Attempting to send email to ${email} via ${smtpHost}:${process.env.SMTP_PORT}...`);
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
-    });
+  console.log(`[Password Reset] SMTP not configured properly. Reset link for ${email}: ${resetLink}`);
+  return false;
+}
 
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
-      to: email,
-      subject: 'Password reset request',
-      text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
-      html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
-    });
+async function sendTransactionalEmail({ to, subject, text, html, tag }) {
+  if (!to) return false;
 
-    console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${info.messageId}`);
-    return true;
-  } catch (e) {
-    console.warn(`[Password Reset] SMTP error: ${e?.message || e}. Falling back to console log.`);
-    console.log(`[Password Reset] Reset link for ${email}: ${resetLink}`);
-    return false;
+  if (smtpTransporter) {
+    try {
+      await smtpTransporter.sendMail({
+        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        to,
+        subject,
+        text,
+        html,
+      });
+      return true;
+    } catch (e) {
+      console.warn(`[${tag}] Failed to send SMTP email: ${e?.message || e}`);
+      console.log(`[${tag}] Fallback log for ${to}`);
+      console.log(`[${tag}] Subject: ${subject}`);
+      console.log(`[${tag}] Body: ${text}`);
+      return false;
+    }
+  }
+
+  console.log(`[${tag}] SMTP not configured. Email to ${to}`);
+  console.log(`[${tag}] Subject: ${subject}`);
+  console.log(`[${tag}] Body: ${text}`);
+  return false;
+}
+
+function getOrderPartyDetails(order) {
+  const buyer = users.find((u) => String(u.id) === String(order.buyerId));
+  const farmer = users.find((u) => String(u.id) === String(order.farmerId));
+
+  return {
+    buyer,
+    farmer,
+    buyerEmail: String(order.buyerEmail || buyer?.email || '').trim(),
+    farmerEmail: String(order.farmerEmail || farmer?.email || '').trim(),
+    buyerName: String(order.buyerName || buyer?.name || 'Buyer').trim(),
+    farmerName: String(order.farmerName || farmer?.name || 'Farmer').trim(),
+    buyerPhone: String(order.buyerPhone || buyer?.phone || '').trim(),
+    buyerLocation: String(order.buyerLocation || buyer?.location || order.deliveryAddress || '').trim(),
+  };
+}
+
+function buildOrderDetailsText(order) {
+  return [
+    `Order ID: ${order.id}`,
+    `Product: ${order.productName || 'N/A'}`,
+    `Quantity: ${order.quantity ?? 'N/A'}`,
+    `Total Price: ${order.totalPrice ?? 'N/A'}`,
+    `Payment Method: ${order.paymentMethod || 'N/A'}`,
+    `Payment Status: ${order.paymentStatus || 'N/A'}`,
+    `Order Status: ${order.status || 'pending'}`,
+    `Delivery Status: ${order.deliveryStatus || 'pending'}`,
+    `Delivery Option: ${order.deliveryOption || 'N/A'}`,
+    `Delivery Address: ${order.deliveryAddress || 'N/A'}`,
+    `Order Date: ${order.orderDate || order.createdAt || new Date().toISOString()}`,
+  ].join('\n');
+}
+
+async function sendOrderPlacementEmails(order) {
+  console.log('[Order Emails] Processing order', order.id);
+  const { buyerEmail, farmerEmail, buyerName, farmerName, buyerPhone, buyerLocation } = getOrderPartyDetails(order);
+  const details = buildOrderDetailsText(order);
+
+  if (farmerEmail) {
+    const farmerText = [
+      `Hello ${farmerName},`,
+      '',
+      'A new order has been placed successfully by a buyer.',
+      '',
+      'Buyer details:',
+      `Name: ${buyerName}`,
+      `Email: ${buyerEmail || 'N/A'}`,
+      `Phone: ${buyerPhone || 'N/A'}`,
+      `Location: ${buyerLocation || 'N/A'}`,
+      '',
+      'Complete order details:',
+      details,
+      '',
+      'Please review and process this order in your dashboard.',
+    ].join('\n');
+
+    if (smtpTransporter) {
+      console.log('[Order Placement Farmer] Sending to', farmerEmail);
+      void smtpTransporter.sendMail({
+        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        to: farmerEmail,
+        subject: `New order placed: ${order.productName || order.id}`,
+        text: farmerText,
+        html: `<p>Hello ${farmerName},</p><p>A new order has been placed successfully by a buyer.</p><p><strong>Buyer details</strong><br/>Name: ${buyerName}<br/>Email: ${buyerEmail || 'N/A'}<br/>Phone: ${buyerPhone || 'N/A'}<br/>Location: ${buyerLocation || 'N/A'}</p><p><strong>Complete order details</strong><br/><pre>${details}</pre></p><p>Please review and process this order in your dashboard.</p>`,
+      }).catch(e => {
+        console.warn('[Order Placement Farmer] SMTP send failed, falling back to log', e && e.message ? e.message : e);
+        console.log('[Order Placement Farmer] Email to', farmerEmail);
+        console.log('[Order Placement Farmer] Subject:', `New order placed: ${order.productName || order.id}`);
+        console.log('[Order Placement Farmer] Body:', farmerText);
+      });
+    } else {
+      void sendTransactionalEmail({
+        to: farmerEmail,
+        subject: `New order placed: ${order.productName || order.id}`,
+        text: farmerText,
+        html: `<p>Hello ${farmerName},</p><p>A new order has been placed successfully by a buyer.</p><p><strong>Buyer details</strong><br/>Name: ${buyerName}<br/>Email: ${buyerEmail || 'N/A'}<br/>Phone: ${buyerPhone || 'N/A'}<br/>Location: ${buyerLocation || 'N/A'}</p><p><strong>Complete order details</strong><br/><pre>${details}</pre></p><p>Please review and process this order in your dashboard.</p>`,
+        tag: 'Order Placement Farmer',
+      });
+    }
+  }
+
+  if (buyerEmail) {
+    const buyerText = [
+      `Hello ${buyerName},`,
+      '',
+      'Your order has been placed successfully.',
+      `Order name: ${order.productName || 'N/A'}`,
+      '',
+      'Order details:',
+      details,
+      '',
+      'Thank you for shopping with Farm Direct.',
+    ].join('\n');
+
+    if (smtpTransporter) {
+      console.log('[Order Placement Buyer] Sending to', buyerEmail);
+      void smtpTransporter.sendMail({
+        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        to: buyerEmail,
+        subject: `Order confirmed: ${order.productName || order.id}`,
+        text: buyerText,
+        html: `<p>Hello ${buyerName},</p><p>Your order has been placed successfully.</p><p><strong>Order name:</strong> ${order.productName || 'N/A'}</p><p><strong>Order details</strong><br/><pre>${details}</pre></p><p>Thank you for shopping with Farm Direct.</p>`,
+      }).catch(e => {
+        console.warn('[Order Placement Buyer] SMTP send failed, falling back to log', e && e.message ? e.message : e);
+        console.log('[Order Placement Buyer] Email to', buyerEmail);
+        console.log('[Order Placement Buyer] Subject:', `Order confirmed: ${order.productName || order.id}`);
+        console.log('[Order Placement Buyer] Body:', buyerText);
+      });
+    } else {
+      void sendTransactionalEmail({
+        to: buyerEmail,
+        subject: `Order confirmed: ${order.productName || order.id}`,
+        text: buyerText,
+        html: `<p>Hello ${buyerName},</p><p>Your order has been placed successfully.</p><p><strong>Order name:</strong> ${order.productName || 'N/A'}</p><p><strong>Order details</strong><br/><pre>${details}</pre></p><p>Thank you for shopping with Farm Direct.</p>`,
+        tag: 'Order Placement Buyer',
+      });
+    }
   }
 }
+
+function getOrderStatusEmailMessage(order) {
+  const normalized = String(order.deliveryStatus || order.status || '').toLowerCase();
+  if (normalized === 'shipped') {
+    return {
+      subject: `Order shipped: ${order.productName || order.id}`,
+      message: 'Your product has been shipped by the farmer.',
+    };
+  }
+  if (normalized === 'out-for-delivery') {
+    return {
+      subject: `Out for delivery: ${order.productName || order.id}`,
+      message: 'Your order is out for delivery.',
+    };
+  }
+  if (normalized === 'delivered') {
+    return {
+      subject: `Delivered successfully: ${order.productName || order.id}`,
+      message: 'Your order has been delivered successfully.',
+    };
+  }
+
+  return {
+    subject: `Order status updated: ${order.productName || order.id}`,
+    message: `Your order status has been updated to ${order.deliveryStatus || order.status || 'updated'}.`,
+  };
+}
+
+async function sendOrderStatusEmailToBuyer(order) {
+  const { buyerEmail, buyerName } = getOrderPartyDetails(order);
+  if (!buyerEmail) return;
+
+  const { subject, message } = getOrderStatusEmailMessage(order);
+  const details = buildOrderDetailsText(order);
+  const text = [
+    `Hello ${buyerName},`,
+    '',
+    message,
+    '',
+    `Order name: ${order.productName || 'N/A'}`,
+    '',
+    'Latest order details:',
+    details,
+  ].join('\n');
+
+  await sendTransactionalEmail({
+    to: buyerEmail,
+    subject,
+    text,
+    html: `<p>Hello ${buyerName},</p><p>${message}</p><p><strong>Order name:</strong> ${order.productName || 'N/A'}</p><p><strong>Latest order details</strong><br/><pre>${details}</pre></p>`,
+    tag: 'Order Status Buyer',
+  });
+}
+
 
 if (users.length === 0) {
   users.push({
@@ -124,6 +348,10 @@ function loadNotifications() {
 function saveNotifications(data){ fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(data, null, 2)); }
 let notifications = loadNotifications();
 
+function loadOtps(){ try { return JSON.parse(fs.readFileSync(OTPS_FILE, 'utf8') || '[]'); } catch { return []; } }
+function saveOtps(data){ fs.writeFileSync(OTPS_FILE, JSON.stringify(data, null, 2)); }
+let otps = loadOtps();
+
 app.get('/api/users', (req, res) => res.json(users));
 app.post('/api/users', (req, res) => {
   // Handle password hashing if provided
@@ -149,6 +377,85 @@ app.post('/api/users', (req, res) => {
   delete safe.passwordHash;
   delete safe.passwordSalt;
   res.status(201).json(safe);
+});
+
+// Send OTP to an email for verification (used during signup)
+app.post('/api/auth/send-otp', async (req, res) => {
+  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+
+  // create 6-digit OTP
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+  const expiresAt = Date.now() + (5 * 60 * 1000); // 5 minutes
+
+  // remove existing for email
+  otps = otps.filter((e) => e.email !== email);
+  otps.push({ email, otpHash, expiresAt });
+  saveOtps(otps);
+
+  const mailSent = (async () => {
+    const smtpHost = process.env.SMTP_HOST;
+    if (!smtpHost) {
+      console.log(`[OTP] SMTP not configured, OTP for ${email}: ${otp}`);
+      return false;
+    }
+
+    try {
+      const transporter = require('nodemailer').createTransport({
+        host: smtpHost,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+        auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      });
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        to: email,
+        subject: 'Your verification code',
+        text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
+        html: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
+      });
+      return true;
+    } catch (e) {
+      console.warn('[OTP] email send failed, falling back to console', e && e.message ? e.message : e);
+      console.log(`[OTP] OTP for ${email}: ${otp}`);
+      return false;
+    }
+  })();
+
+  // fire-and-forget
+  void mailSent;
+
+  res.json({ success: true });
+});
+
+// Verify OTP
+app.post('/api/auth/verify-otp', (req, res) => {
+  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  const otp = String((req.body && req.body.otp) || '').trim();
+  if (!email || !otp) return res.status(400).json({ error: 'Email and otp are required' });
+
+  const entryIndex = otps.findIndex((e) => e.email === email);
+  if (entryIndex < 0) return res.status(400).json({ error: 'OTP not found or expired' });
+
+  const entry = otps[entryIndex];
+  if (Date.now() > Number(entry.expiresAt)) {
+    otps.splice(entryIndex, 1);
+    saveOtps(otps);
+    return res.status(400).json({ error: 'OTP expired' });
+  }
+
+  const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+  if (otpHash !== entry.otpHash) {
+    return res.status(400).json({ error: 'Invalid OTP' });
+  }
+
+  // valid - remove entry
+  otps.splice(entryIndex, 1);
+  saveOtps(otps);
+
+  res.json({ success: true });
 });
 app.put('/api/users/:id', (req, res) => {
   const idx = users.findIndex((u) => u.id === req.params.id);
@@ -267,6 +574,9 @@ app.post('/api/orders', (req, res) => {
     if (io) io.to(`user_${order.farmerId}`).emit('notification:new', notif);
     if (io) io.to(`user_${order.farmerId}`).emit('order:placed', order);
   } catch(e) {}
+
+  void sendOrderPlacementEmails(order);
+
   res.status(201).json(order);
 });
 
@@ -471,9 +781,18 @@ app.put('/api/orders/:id', (req, res) => {
   const idx = orders.findIndex((o) => o.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'Order not found' });
 
+  const previous = { ...orders[idx] };
+
   // Merge updates
   orders[idx] = { ...orders[idx], ...req.body };
   saveData(ORDERS_FILE, orders);
+  const updated = orders[idx];
+
+  const statusChanged = String(previous.status || '') !== String(updated.status || '');
+  const deliveryStatusChanged = String(previous.deliveryStatus || '') !== String(updated.deliveryStatus || '');
+  if (statusChanged || deliveryStatusChanged) {
+    void sendOrderStatusEmailToBuyer(updated);
+  }
 
   // Log activity (best-effort)
   try {
@@ -494,7 +813,7 @@ app.put('/api/orders/:id', (req, res) => {
     console.warn('Failed to log activity for order update', e);
   }
 
-  res.json(orders[idx]);
+  res.json(updated);
 });
 
 app.get('/api/activity', (req,res)=> res.json(activityLogs));
@@ -640,6 +959,85 @@ app.post('/api/notifications', (req, res) => {
   // Emit via socket if available
   try { if (io) io.to(`user_${incoming.userId}`).emit('notification:new', incoming); } catch (e) {}
   res.status(201).json(incoming);
+});
+
+// Buyer cancels an order (allowed only before shipping/out-for-delivery/delivered)
+app.post('/api/orders/:id/cancel', (req, res) => {
+  const id = req.params.id;
+  const idx = orders.findIndex((o) => o.id === id);
+  if (idx < 0) return res.status(404).json({ error: 'Order not found' });
+
+  const existing = orders[idx];
+  // Disallow cancel if already shipped/out-for-delivery or delivered
+  const disallowedDeliveryStatuses = ['out-for-delivery', 'delivered'];
+  const disallowedOrderStatuses = ['shipped', 'delivered', 'cancelled'];
+
+  if (disallowedDeliveryStatuses.includes(String(existing.deliveryStatus)) || disallowedOrderStatuses.includes(String(existing.status))) {
+    return res.status(400).json({ error: 'Order cannot be cancelled after shipping or delivery' });
+  }
+
+  // Apply cancellation
+  orders[idx] = {
+    ...existing,
+    status: 'cancelled',
+    deliveryStatus: 'cancelled',
+  };
+
+  // If payment was made, mark paymentStatus to 'refunded' (best-effort simulation)
+  try {
+    if (orders[idx].paymentStatus === 'paid') {
+      orders[idx].paymentStatus = 'refunded';
+    }
+  } catch (e) {}
+
+  saveData(ORDERS_FILE, orders);
+
+  try {
+    const entry = { id: uuidv4(), userId: orders[idx].buyerId, userName: orders[idx].buyerName, userRole: 'buyer', action: 'cancelled order', targetId: orders[idx].id, targetType: 'order', timestamp: new Date().toISOString() };
+    activityLogs.unshift(entry);
+    saveData(ACTIVITY_FILE, activityLogs);
+  } catch (e) {}
+
+  // Notify farmer and buyer
+  try {
+    const notifToFarmer = {
+      id: uuidv4(),
+      userId: orders[idx].farmerId,
+      type: 'order',
+      title: 'Order cancelled by buyer',
+      message: `${orders[idx].buyerName} cancelled order ${orders[idx].id} for ${orders[idx].productName}`,
+      timestamp: new Date().toISOString(),
+      read: false,
+      actionUrl: '/orders'
+    };
+
+    const notifToBuyer = {
+      id: uuidv4(),
+      userId: orders[idx].buyerId,
+      type: 'order',
+      title: 'Order cancelled',
+      message: `Your order ${orders[idx].id} was cancelled successfully.`,
+      timestamp: new Date().toISOString(),
+      read: false,
+      actionUrl: '/orders'
+    };
+
+    notifications.unshift(notifToFarmer);
+    notifications.unshift(notifToBuyer);
+    saveNotifications(notifications);
+
+    if (io) {
+      io.to(`user_${orders[idx].farmerId}`).emit('notification:new', notifToFarmer);
+      io.to(`user_${orders[idx].buyerId}`).emit('notification:new', notifToBuyer);
+      // Emit order cancelled event for real-time UI updates
+      io.to(`user_${orders[idx].farmerId}`).emit('order:cancelled', orders[idx]);
+      io.to(`user_${orders[idx].buyerId}`).emit('order:cancelled', orders[idx]);
+    }
+  } catch (e) {
+    console.warn('Failed to emit cancellation notifications', e && e.message ? e.message : e);
+  }
+
+  res.json(orders[idx]);
 });
 
 app.put('/api/notifications/:id', (req, res) => {

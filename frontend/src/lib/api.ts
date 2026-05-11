@@ -32,6 +32,9 @@ export const addProductReview = (productId: string, review: Omit<ProductReview, 
 export const fetchOrders = () => request<Order[]>('/orders');
 export const createOrder = (order: Omit<Order, 'id' | 'orderDate' | 'status' | 'deliveryStatus'>) => request<Order>('/orders', { method: 'POST', body: JSON.stringify(order) });
 export const updateOrderApi = (id: string, updates: Partial<Order>) => request<Order>(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
+export const cancelOrderApi = (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' });
+export const sendOtp = (email: string) => request<Record<string, any>>('/auth/send-otp', { method: 'POST', body: JSON.stringify({ email }) });
+export const verifyOtp = (email: string, otp: string) => request<Record<string, any>>('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ email, otp }) });
 
 export const fetchMessages = () => request<Message[]>('/messages');
 export const createMessage = (message: Omit<Message, 'id'> & { id?: string }) =>

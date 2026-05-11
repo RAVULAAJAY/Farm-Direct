@@ -16,6 +16,7 @@ import {
 } from '@/lib/validation';
 import { getAdminLoginEmail, hasAdminLoginCredentials, isAdminCredentialMatch } from '@/lib/adminAuth';
 import { fetchUsers } from '@/lib/api';
+import * as api from '@/lib/api';
 import { UserRole, type User } from '@/context/AuthContext';
 import { useGlobalState } from '@/context/GlobalStateContext';
 import BrandLogo from '@/components/BrandLogo';
@@ -106,6 +107,11 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
   const [isCameraStarting, setIsCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [isBuyerLocationGranted, setIsBuyerLocationGranted] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpValue, setOtpValue] = useState('');
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
 
@@ -132,6 +138,18 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
   const updateField = (name: string, value: string) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
 
+    if (name === 'email') {
+      if (emailVerified) {
+        setEmailVerified(false);
+      }
+      if (otpSent) {
+        setOtpSent(false);
+      }
+      if (otpValue) {
+        setOtpValue('');
+      }
+    }
+
     if (fieldErrors[name]) {
       setFieldErrors((prev) => ({ ...prev, [name]: '' }));
     }
@@ -141,6 +159,35 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
     }
 
     setGeneralError('');
+  };
+
+  const handleSendOtp = async () => {
+    const email = formData.email?.trim();
+    if (!email) { setFieldError('email', 'Email is required'); return; }
+    setSendingOtp(true);
+    try {
+      await api.sendOtp(email);
+      setOtpSent(true);
+      setEmailVerified(false);
+      window.alert('OTP sent to email (check console if SMTP not configured).');
+    } catch (e) {
+      console.error('Failed to send OTP', e);
+      window.alert('Unable to send OTP right now.');
+    } finally { setSendingOtp(false); }
+  };
+
+  const handleVerifyOtp = async () => {
+    const email = formData.email?.trim();
+    if (!email || !otpValue) { setFieldError('otp', 'Email and OTP required'); return; }
+    setVerifyingOtp(true);
+    try {
+      await api.verifyOtp(email, otpValue.trim());
+      setEmailVerified(true);
+      window.alert('Email verified');
+    } catch (e) {
+      console.error('OTP verification failed', e);
+      window.alert('Invalid or expired OTP');
+    } finally { setVerifyingOtp(false); }
   };
 
   const setFieldError = (field: string, message: string) => {
@@ -431,6 +478,12 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
     setFieldErrors({});
 
     const submitMode = role === 'admin' ? 'login' : mode;
+
+    if (submitMode === 'signup' && !emailVerified) {
+      setGeneralError('Please verify your email OTP before creating an account.');
+      setIsSubmitting(false);
+      return;
+    }
 
     if (role === 'admin') {
       if (!hasAdminLoginCredentials()) {
@@ -731,19 +784,21 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                     {fieldErrors.name && <p className="text-sm text-red-600">{fieldErrors.name}</p>}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      id="email"
-                      name="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => updateField('email', e.target.value)}
-                      placeholder="name@example.com"
-                      className={fieldErrors.email ? 'border-red-500' : ''}
-                    />
-                    {fieldErrors.email && <p className="text-sm text-red-600">{fieldErrors.email}</p>}
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <div className="flex gap-2">
+                    <Input id="email" type="email" value={formData.email} onChange={(e) => updateField('email', e.target.value)} placeholder="name@example.com" />
+                    <Button type="button" onClick={handleSendOtp} disabled={sendingOtp} className="whitespace-nowrap">{otpSent ? 'Resend OTP' : 'Send OTP'}</Button>
                   </div>
+                  {otpSent && (
+                    <div className="mt-2 flex gap-2 items-center">
+                      <Input placeholder="Enter OTP" value={otpValue} onChange={(e) => setOtpValue(e.target.value)} />
+                      <Button type="button" onClick={handleVerifyOtp} disabled={verifyingOtp}>Verify</Button>
+                      {emailVerified && <span className="text-sm text-green-600">Verified</span>}
+                    </div>
+                  )}
+                </div>
+                
                 </div>
               )}
 
@@ -1315,7 +1370,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
 
               <Button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || (effectiveMode === 'signup' && !emailVerified)}
                 className={`w-full text-white ${roleStyle.buttonClass}`}
               >
                 {isSubmitting
@@ -1326,6 +1381,9 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                   ? 'Sign In'
                   : 'Create Account'}
               </Button>
+              {effectiveMode === 'signup' && !emailVerified && (
+                <p className="text-xs text-amber-700">Verify your email OTP to enable account creation.</p>
+              )}
             </form>
 
             {isCameraOpen && (

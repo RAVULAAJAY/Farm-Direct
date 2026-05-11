@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowLeft } from 'lucide-react';
 import type { User } from '@/context/AuthContext';
 import { getAdminLoginEmail, hasAdminLoginCredentials, isAdminCredentialMatch } from '@/lib/adminAuth';
+import * as api from '@/lib/api';
 
 interface AuthFormProps {
   role: 'farmer' | 'buyer' | 'admin';
@@ -25,9 +26,19 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
     phone: '',
     location: ''
   });
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
 
   const submitForm = () => {
     console.debug('[AuthForm] submitForm called', { email: formData.email });
+    if (mode === 'signup' && role !== 'admin' && !emailVerified) {
+      window.alert('Please verify your email OTP before creating an account.');
+      return;
+    }
+
     if (role === 'admin') {
       if (!hasAdminLoginCredentials()) {
         return;
@@ -64,6 +75,37 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
     // Store in localStorage for demo purposes
     localStorage.setItem('currentUser', JSON.stringify(user));
     onSuccess(user);
+  };
+
+  const handleSendOtp = async () => {
+    if (!formData.email) return;
+    setSendingOtp(true);
+    try {
+      await api.sendOtp(formData.email);
+      setOtpSent(true);
+      setEmailVerified(false);
+      window.alert('OTP sent to email (check console if SMTP not configured).');
+    } catch (e) {
+      console.error('Failed to send OTP', e);
+      window.alert('Unable to send OTP right now.');
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!formData.email || !otp) return;
+    setVerifyingOtp(true);
+    try {
+      await api.verifyOtp(formData.email, otp);
+      setEmailVerified(true);
+      window.alert('Email verified');
+    } catch (e) {
+      console.error('OTP verify failed', e);
+      window.alert('Invalid or expired OTP');
+    } finally {
+      setVerifyingOtp(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -125,14 +167,33 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
             
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
-                required
-                placeholder="Enter your email"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => {
+                    setFormData({...formData, email: e.target.value});
+                    if (emailVerified) setEmailVerified(false);
+                    if (otpSent) setOtpSent(false);
+                    if (otp) setOtp('');
+                  }}
+                  required
+                  placeholder="Enter your email"
+                />
+                <Button type="button" onClick={handleSendOtp} disabled={sendingOtp} className="whitespace-nowrap">
+                  {otpSent ? 'Resend OTP' : 'Send OTP'}
+                </Button>
+              </div>
+              {otpSent && (
+                <div className="mt-2 flex gap-2 items-center">
+                  <Input placeholder="Enter OTP" value={otp} onChange={(e) => setOtp(e.target.value)} />
+                  <Button type="button" onClick={handleVerifyOtp} disabled={verifyingOtp}>
+                    Verify
+                  </Button>
+                  {emailVerified && <span className="text-sm text-green-600">Verified</span>}
+                </div>
+              )}
             </div>
             
             <div className="space-y-2">
@@ -188,10 +249,14 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
             
             <Button 
               type="submit" 
+              disabled={effectiveMode === 'signup' && !emailVerified}
               className={`w-full bg-${roleColor}-600 hover:bg-${roleColor}-700 text-white py-3`}
             >
               {effectiveMode === 'login' ? 'Sign In' : 'Create Account'}
             </Button>
+            {effectiveMode === 'signup' && !emailVerified && (
+              <p className="text-xs text-amber-700">Verify your email OTP to enable account creation.</p>
+            )}
           </form>
 
           {role !== 'admin' && (

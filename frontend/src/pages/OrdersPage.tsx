@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useGlobalState } from '@/context/GlobalStateContext';
+import * as api from '@/lib/api';
 import { Order } from '@/lib/data';
 
 type OrderStatus = 'pending' | 'accepted' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
@@ -307,6 +308,27 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
     navigate(`/messages?${query.toString()}`);
   };
 
+  const handleBuyerCancel = async (order: Order) => {
+    if (!isBuyer) return;
+
+    const canCancel = order.status !== 'delivered' && order.status !== 'cancelled' && order.deliveryStatus !== 'out-for-delivery' && order.status !== 'shipped';
+    if (!canCancel) {
+      window.alert('Order cannot be cancelled after shipping or delivery.');
+      return;
+    }
+
+    const ok = window.confirm('Are you sure you want to cancel this order?');
+    if (!ok) return;
+
+    try {
+      const saved = await api.cancelOrderApi(order.id);
+      updateOrder(order.id, saved);
+    } catch (e) {
+      console.error('Failed to cancel order', e);
+      window.alert('Unable to cancel order right now. Please try again.');
+    }
+  };
+
   const selectedInvoiceBuyer = selectedInvoiceOrder ? users.find((entry) => entry.id === selectedInvoiceOrder.buyerId) ?? null : null;
   const selectedInvoiceFarmer = selectedInvoiceOrder ? users.find((entry) => entry.id === selectedInvoiceOrder.farmerId) ?? null : null;
   const selectedInvoiceProduct = selectedInvoiceOrder ? products.find((entry) => entry.id === selectedInvoiceOrder.productId) ?? null : null;
@@ -533,6 +555,11 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                       <Download className="h-4 w-4" />
                       Invoice
                     </Button>
+                    {isBuyer && order.status !== 'delivered' && order.status !== 'cancelled' && order.deliveryStatus !== 'out-for-delivery' && order.status !== 'shipped' && (
+                      <Button variant="destructive" size="sm" className="gap-2" onClick={() => handleBuyerCancel(order)}>
+                        Cancel Order
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -582,6 +609,11 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                         <Download className="h-4 w-4" />
                         Invoice
                       </Button>
+                      {isBuyer && order.status !== 'delivered' && order.status !== 'cancelled' && order.deliveryStatus !== 'out-for-delivery' && order.status !== 'shipped' && (
+                        <Button variant="destructive" onClick={() => handleBuyerCancel(order)} className="gap-2">
+                          Cancel Order
+                        </Button>
+                      )}
                       {isFarmer && (
                         <Button variant="outline" onClick={() => handleAcceptOrder(order)} className="gap-2">
                           Accept Order
@@ -805,6 +837,11 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                 <Download className="mr-2 h-4 w-4" />
                 View Invoice
               </Button>
+              {isBuyer && selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && selectedOrder.deliveryStatus !== 'out-for-delivery' && selectedOrder.status !== 'shipped' && (
+                <Button variant="destructive" className="w-full" onClick={() => { handleBuyerCancel(selectedOrder); handleCloseOrderDetail(); }}>
+                  Cancel Order
+                </Button>
+              )}
               {isBuyer && selectedOrder.status === 'delivered' && (
                 <Button variant="outline" className="w-full" onClick={() => handleOpenRatingDialog(selectedOrder)}>
                   <Star className="mr-2 h-4 w-4" />
