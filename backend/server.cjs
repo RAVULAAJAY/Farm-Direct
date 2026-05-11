@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -53,6 +55,48 @@ const AUTO_WISH_ENABLED = (process.env.AUTO_WISH_ENABLED || 'false').toLowerCase
 const AUTO_WISH_HOUR = Number(process.env.AUTO_WISH_HOUR || 9);
 const AUTO_WISH_MINUTE = Number(process.env.AUTO_WISH_MINUTE || 0);
 const AUTO_WISH_MESSAGE = process.env.AUTO_WISH_MESSAGE || 'Good morning from Farm Direct! Have a great day.';
+
+function getFrontendBase(req) {
+  const requestOrigin = typeof req?.headers?.origin === 'string' ? req.headers.origin.trim() : '';
+  const configuredBase = (process.env.FRONTEND_BASE || 'http://localhost:8080').trim();
+  return (requestOrigin || configuredBase).replace(/\/$/, '');
+}
+
+async function sendPasswordResetEmail({ email, resetLink }) {
+  const smtpHost = process.env.SMTP_HOST;
+  if (!smtpHost) {
+    console.log(`[Password Reset] SMTP not configured, reset link: ${resetLink}`);
+    return false;
+  }
+
+  try {
+    console.log(`[Password Reset] Attempting to send email to ${email} via ${smtpHost}:${process.env.SMTP_PORT}...`);
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      connectionTimeout: 10000,
+      socketTimeout: 10000,
+    });
+
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+      to: email,
+      subject: 'Password reset request',
+      text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
+      html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
+    });
+
+    console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${info.messageId}`);
+    return true;
+  } catch (e) {
+    console.warn(`[Password Reset] SMTP error: ${e?.message || e}. Falling back to console log.`);
+    console.log(`[Password Reset] Reset link for ${email}: ${resetLink}`);
+    return false;
+  }
+}
 
 if (users.length === 0) {
   users.push({
@@ -359,33 +403,13 @@ app.post('/api/auth/forgot', async (req, res) => {
   user.resetPasswordExpiry = Date.now() + (60 * 60 * 1000); // 1 hour
   saveData(USERS_FILE, users);
 
-  const frontendBase = process.env.FRONTEND_BASE || 'http://localhost:8080';
-  const resetLink = `${frontendBase.replace(/\/$/, '')}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
+  const frontendBase = getFrontendBase(req);
+  const resetLink = `${frontendBase}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
 
   // Try to send email via nodemailer if configured, otherwise log
   let emailed = false;
   try {
-    const smtpHost = process.env.SMTP_HOST;
-    if (smtpHost) {
-      const nodemailer = require('nodemailer');
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: (process.env.SMTP_SECURE || 'false') === 'true',
-        auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      });
-
-      const mailOptions = {
-        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
-        to: email,
-        subject: 'Password reset request',
-        text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
-        html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
-      };
-
-      await transporter.sendMail(mailOptions);
-      emailed = true;
-    }
+    emailed = await sendPasswordResetEmail({ email, resetLink });
   } catch (e) {
     console.warn('Failed to send reset email via SMTP, falling back to console log', e && e.message ? e.message : e);
   }
