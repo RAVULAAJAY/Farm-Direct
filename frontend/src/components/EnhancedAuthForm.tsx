@@ -817,7 +817,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                 )}
                   {effectiveMode === 'login' && (
                     <div className="text-right">
-                      <Button variant="link" onClick={() => navigate('/forgot-password')} className="p-0 text-sm">
+                      <Button type="button" variant="link" onClick={() => navigate('/forgot-password')} className="p-0 text-sm">
                         Forgot password?
                       </Button>
                     </div>

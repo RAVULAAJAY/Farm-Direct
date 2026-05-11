@@ -47,8 +47,12 @@ const FavoritesPage: React.FC = () => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {favoriteProducts.map((product) => (
             <Card key={product.id} className="overflow-hidden transition-shadow hover:shadow-lg">
-              <div className="flex h-32 items-center justify-center bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 text-5xl">
-                {product.image}
+              <div className="flex h-40 items-center justify-center bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50">
+                {product.image && /^[a-zA-Z0-9+/]/.test(product.image) ? (
+                  <img src={product.image} alt={product.name} className="h-32 w-32 object-contain" />
+                ) : (
+                  <div className="text-6xl">{product.image}</div>
+                )}
               </div>
               <CardContent className="space-y-3 pt-4">
                 <div className="flex items-start justify-between gap-3">

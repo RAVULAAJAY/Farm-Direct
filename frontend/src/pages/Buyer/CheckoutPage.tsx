@@ -76,6 +76,11 @@ const CheckoutPage: React.FC = () => {
     { value: 'cod', label: 'Cash on Delivery', icon: <Wallet className="h-4 w-4" /> },
   ];
 
+  const redirectToOrders = (message: string) => {
+    setSuccessMessage(message);
+    window.setTimeout(() => navigate('/orders', { replace: true, state: { orderSuccessMessage: message } }), 1400);
+  };
+
   const handleConfirmOrder = async () => {
     setErrorMessage('');
     setSuccessMessage('');
@@ -85,7 +90,7 @@ const CheckoutPage: React.FC = () => {
       return;
     }
 
-    if (paymentMethod !== 'cod' && !hasBuyerPaymentDetails(currentUser)) {
+    if (paymentMethod === 'card' && !hasBuyerPaymentDetails(currentUser)) {
       const next = encodeURIComponent('/checkout');
       navigate(`/buyer/add-payment?warning=payment-required&next=${next}`);
       return;
@@ -144,8 +149,7 @@ const CheckoutPage: React.FC = () => {
           console.error('Failed to persist card payment info', err);
         }
 
-        setSuccessMessage('Payment successful. Order placed — redirecting...');
-        window.setTimeout(() => navigate('/orders'), 1400);
+        redirectToOrders('Payment successful. Order placed successfully. Redirecting to your orders...');
       } catch (err) {
         setErrorMessage(String(err) || 'Payment failed');
       } finally {
@@ -168,8 +172,7 @@ const CheckoutPage: React.FC = () => {
       return;
     }
 
-    setSuccessMessage('Order confirmed successfully. Redirecting to your orders...');
-    window.setTimeout(() => navigate('/orders'), 1400);
+    redirectToOrders('Order placed successfully. Redirecting to your orders...');
   };
 
   // Simple Luhn check for card numbers
@@ -198,6 +201,27 @@ const CheckoutPage: React.FC = () => {
   };
 
   if (detailedItems.length === 0) {
+    if (successMessage) {
+      return (
+        <div className="space-y-6">
+          <h1 className="text-3xl font-bold text-gray-900">Checkout</h1>
+          <Alert className="border-green-200 bg-green-50 text-green-800">
+            <CheckCircle className="h-4 w-4" />
+            <AlertDescription>{successMessage}</AlertDescription>
+          </Alert>
+          <Card>
+            <CardContent className="flex min-h-56 flex-col items-center justify-center gap-4 text-center">
+              <Truck className="h-12 w-12 text-gray-400" />
+              <div>
+                <p className="text-lg font-semibold text-gray-900">Order placed successfully</p>
+                <p className="text-sm text-gray-600">Redirecting to your orders page now.</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold text-gray-900">Checkout</h1>
@@ -455,8 +479,7 @@ const CheckoutPage: React.FC = () => {
                   setErrorMessage(result.message);
                   return;
                 }
-                setSuccessMessage('Order placed with Cash on Delivery. Redirecting to orders...');
-                window.setTimeout(() => navigate('/orders'), 1400);
+                redirectToOrders('Order placed successfully with Cash on Delivery. Redirecting to your orders...');
               }}>
                 Confirm & Place Order
               </Button>

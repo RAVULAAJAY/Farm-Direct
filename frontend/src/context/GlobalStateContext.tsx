@@ -902,7 +902,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
     setProducts((prev) => {
       const updated = prev.filter((product) => product.farmerId !== userId);
-      localStorage.setItem('products', JSON.stringify(updated));
+      safeSetLocalStorageItem('products', updated);
       return updated;
     });
 
@@ -1206,13 +1206,13 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
           });
         });
 
-        localStorage.setItem('products', JSON.stringify(updated));
+        safeSetLocalStorageItem('products', updated);
         return updated;
       });
 
       setOrders((prev) => {
         const updated = [...prev, savedOrder];
-        localStorage.setItem('orders', JSON.stringify(updated));
+        safeSetLocalStorageItem('orders', updated);
         return updated;
       });
 

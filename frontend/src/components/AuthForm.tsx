@@ -26,9 +26,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
     location: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const submitForm = () => {
+    console.debug('[AuthForm] submitForm called', { email: formData.email });
     if (role === 'admin') {
       if (!hasAdminLoginCredentials()) {
         return;
@@ -67,6 +66,11 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
     onSuccess(user);
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitForm();
+  };
+
   const navigate = useNavigate();
 
   const roleEmoji = role === 'farmer' ? '🧑‍🌾' : role === 'buyer' ? '🧑‍💼' : '🔐';
@@ -98,7 +102,13 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
         </CardHeader>
         
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              console.debug('[AuthForm] Enter pressed on form');
+              submitForm();
+            }
+          }} className="space-y-4">
             {effectiveMode === 'signup' && (
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
@@ -134,10 +144,16 @@ const AuthForm: React.FC<AuthFormProps> = ({ role, mode, onSuccess, onBack, onMo
                 onChange={(e) => setFormData({...formData, password: e.target.value})}
                 required
                 placeholder="Enter your password"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    submitForm();
+                  }
+                }}
               />
               {effectiveMode === 'login' && role !== 'admin' && (
                 <div className="text-right mt-2">
-                  <Button variant="link" onClick={() => navigate('/forgot-password')} className="p-0 text-sm">Forgot password?</Button>
+                  <Button type="button" variant="link" onClick={() => { console.debug('[AuthForm] forgot password clicked'); navigate('/forgot-password'); }} className="p-0 text-sm">Forgot password?</Button>
                 </div>
               )}
             </div>

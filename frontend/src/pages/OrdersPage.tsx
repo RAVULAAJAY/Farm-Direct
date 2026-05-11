@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -95,6 +95,8 @@ const statusConfig: Record<OrderStatus, { label: string; color: string; icon: Re
 
 const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [orderSuccessMessage, setOrderSuccessMessage] = useState('');
   const { currentUser } = useAuth();
   const { users, orders, products, updateOrder, addProductReview, addNotification, addMessage } = useGlobalState();
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -109,6 +111,13 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
   const isBuyer = user.role === 'buyer';
   const activeUserId = currentUser?.id ?? user.id;
   const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    const state = location.state as { orderSuccessMessage?: string } | undefined;
+    if (state?.orderSuccessMessage) {
+      setOrderSuccessMessage(state.orderSuccessMessage);
+    }
+  }, [location]);
 
   const buyerOrders = useMemo(
     () => orders.filter((order) => order.buyerId === activeUserId),
@@ -389,6 +398,12 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
             : 'Track your purchases and watch order progress update live.'}
         </p>
       </div>
+
+      {orderSuccessMessage && (
+        <Alert className="border-green-200 bg-green-50 text-green-800">
+          <AlertDescription>{orderSuccessMessage}</AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5 md:gap-6">
         {[

@@ -69,7 +69,7 @@ const Layout: React.FC<LayoutProps> = ({
 
         {/* Page Content - with smooth scroll and animations */}
         <main className="flex-1 overflow-y-auto scroll-smooth">
-          <div className="pt-6 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
+          <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
             {children}
           </div>
         </main>

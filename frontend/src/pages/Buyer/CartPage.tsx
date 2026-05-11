@@ -85,12 +85,19 @@ const CartPage: React.FC = () => {
           {detailedItems.map(({ item, product, availableStock, safeQuantity, total }) => (
             <Card key={item.productId}>
               <CardContent className="pt-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-lg font-semibold text-gray-900">{product.name}</p>
-                    <p className="text-sm text-gray-600">{product.farmerName} • {product.location}</p>
-                    <p className="mt-1 text-sm font-medium text-green-700">₹{product.price.toFixed(2)} / {product.unit}</p>
-                    <p className="text-xs text-gray-500">Available: {availableStock} {product.unit}</p>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex gap-4">
+                    {product.image && (
+                      <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 flex-shrink-0">
+                        <img src={product.image} alt={product.name} className="h-20 w-20 object-contain" />
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-lg font-semibold text-gray-900">{product.name}</p>
+                      <p className="text-sm text-gray-600">{product.farmerName} • {product.location}</p>
+                      <p className="mt-1 text-sm font-medium text-green-700">₹{product.price.toFixed(2)} / {product.unit}</p>
+                      <p className="text-xs text-gray-500">Available: {availableStock} {product.unit}</p>
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3">

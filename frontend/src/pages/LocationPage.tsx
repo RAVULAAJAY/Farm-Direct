@@ -191,24 +191,25 @@ const LocationPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 pb-8 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Find Farmers Near You</h1>
-        <p className="text-gray-600 mt-2">Connect directly with local farmers and get fresh produce delivered.</p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-2xl space-y-5">
+        <div className="mb-6">
+          <h1 className="text-4xl font-bold text-gray-900">Find Farmers Near You</h1>
+          <p className="text-gray-600 mt-2 text-sm leading-relaxed">Connect directly with local farmers and get fresh produce delivered straight to your door.</p>
+        </div>
 
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Navigation className="h-5 w-5 text-green-600" />
-              Location
+      <div className="space-y-4">
+        <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-shadow duration-200 bg-white rounded-xl">
+          <CardHeader className="pb-4 pt-5 px-5">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-gray-900">
+              <Navigation className="h-4 w-4 text-green-600" />
+              Select Location
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <Button onClick={handleUseCurrentLocation} className="w-full gap-2" disabled={isDetectingCurrentLocation}>
+          <CardContent className="space-y-3 px-5 pb-5 pt-0">
+            <Button onClick={handleUseCurrentLocation} className="w-full gap-2 bg-green-600 hover:bg-green-700 h-10 text-sm font-medium rounded-lg transition-colors" disabled={isDetectingCurrentLocation}>
               <Navigation className="h-4 w-4" />
-              {isDetectingCurrentLocation ? 'Detecting current location...' : 'Use My Current Location'}
+              {isDetectingCurrentLocation ? 'Detecting location...' : 'Use My Current Location'}
             </Button>
             <LocationSelector
               value={selectedLocation}
@@ -216,11 +217,12 @@ const LocationPage: React.FC = () => {
               placeholder="Search or select location..."
               locations={DEFAULT_LOCATION_OPTIONS}
             />
-            <div className="flex gap-2">
+            <div className="flex gap-2.5">
               <Input
                 value={manualLocation}
                 onChange={(event) => setManualLocation(event.target.value)}
-                placeholder="Or type a location manually"
+                placeholder="Or type location manually"
+                className="h-10 text-sm border-gray-200 rounded-lg"
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
@@ -228,112 +230,98 @@ const LocationPage: React.FC = () => {
                   }
                 }}
               />
-              <Button onClick={handleManualSearch} className="gap-2">
+              <Button onClick={handleManualSearch} className="gap-2 h-10 px-4 bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors font-medium">
                 <Search className="h-4 w-4" />
-                Search
               </Button>
             </div>
             <p className="text-xs text-gray-500">
               {selectedLocation
-                ? `Searching farmers in ${selectedLocation.city}`
-                : 'Select or type a location to search farmers'}
+                ? `Showing farmers in ${selectedLocation.city}`
+                : 'Select or type a location to find farmers'}
             </p>
             {locationError && <p className="text-xs text-red-600">{locationError}</p>}
           </CardContent>
         </Card>
 
-        <Card className="mt-4 overflow-hidden">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-green-600" />
-              Map Preview
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {selectedLocation ? (
-              <>
-                <div className="overflow-hidden rounded-xl border bg-gradient-to-br from-green-50 via-white to-blue-50 p-6 shadow-sm">
-                  <div className="flex h-72 flex-col items-center justify-center rounded-lg border border-dashed border-green-200 bg-white/70 px-6 text-center">
-                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-700 shadow-inner">
-                      <MapPin className="h-8 w-8" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {selectedLocation.city}, {selectedLocation.state}
-                    </h3>
-                    <p className="mt-2 max-w-md text-sm text-gray-600">
-                      Preview selected location on the map and use the search below to fetch matching farmers in the app.
-                    </p>
-
-                    <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-gray-500">
-                      {selectedLocation.coordinates && (
-                        <span className="rounded-full bg-gray-100 px-3 py-1">
-                          {selectedLocation.coordinates.lat.toFixed(4)}, {selectedLocation.coordinates.lng.toFixed(4)}
-                        </span>
-                      )}
-                      <span className="rounded-full bg-gray-100 px-3 py-1">Map preview</span>
-                      <span className="rounded-full bg-gray-100 px-3 py-1">Farmer search</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs text-gray-500">
-                    You stay on this page while the map preview is shown. Use the link only if you want full Maps.
-                  </p>
-                  <Button asChild variant="outline" size="sm" className="gap-2">
-                    <a href={mapUrl} target="_blank" rel="noreferrer">
-                      <ExternalLink className="h-4 w-4" />
-                      Open Maps
-                    </a>
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-gray-500">
-                Pick a location to show the map here.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         {selectedLocation && (
-          <Card className="mt-4">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-green-600" />
-                Farmers Found
+          <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-shadow duration-200 bg-white rounded-xl">
+            <CardHeader className="pb-4 pt-5 px-5">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-gray-900">
+                <MapPin className="h-4 w-4 text-green-600" />
+                Location Preview
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <NearbyFarmers
-                farmers={nearbyFarmers}
-                selectedLocation={selectedLocation.city}
-                maxDistance={50}
-                selectedFarmerId={selectedFarmer?.id}
-                onFarmerClick={handleFarmerClick}
-                onMessage={handleFarmerChat}
-                emptyMessage={`No farmers found for ${selectedLocation.city}`}
-              />
-
-              {selectedFarmer && (
-                <div ref={selectedFarmerRef} className="rounded-3xl border border-green-200 bg-white p-4 shadow-sm">
-                  <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-green-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.2em] text-green-700">Selected Farmer</p>
-                      <h2 className="text-2xl font-bold text-gray-900 mt-1">
-                        {selectedFarmer.farmName || selectedFarmer.name}
-                      </h2>
-                    </div>
-                    <div className="inline-flex items-center rounded-full border border-green-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-green-700">
-                      Profile Details
-                    </div>
+            <CardContent className="space-y-3 px-5 pb-5 pt-0">
+              <div className="overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 via-white to-blue-50 p-4">
+                <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-gray-200 bg-white px-4 py-6 text-center shadow-xs">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 shadow-xs">
+                    <MapPin className="h-6 w-6" />
                   </div>
-                  <FarmerProfileSection user={selectedFarmer} />
+                  <h3 className="text-base font-semibold text-gray-900">
+                    {selectedLocation.city}
+                  </h3>
+                  <p className="mt-1 max-w-sm text-xs text-gray-600">
+                    {selectedLocation.state}
+                  </p>
+                  {selectedLocation.coordinates && (
+                    <div className="mt-3 inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600 font-medium">
+                      {selectedLocation.coordinates.lat.toFixed(4)}, {selectedLocation.coordinates.lng.toFixed(4)}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+              <Button asChild variant="outline" size="sm" className="w-full gap-2 h-10 text-sm border-gray-200 hover:bg-gray-50 font-medium rounded-lg transition-colors">
+                <a href={mapUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                  View on Google Maps
+                </a>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {selectedLocation && (
+          <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-shadow duration-200 bg-white rounded-xl">
+            <CardHeader className="pb-4 pt-5 px-5">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-gray-900">
+                <MapPin className="h-4 w-4 text-green-600" />
+                Farmers in {selectedLocation.city} ({nearbyFarmers.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 px-5 pb-5 pt-0">
+              <div className="space-y-3">
+                <NearbyFarmers
+                  farmers={nearbyFarmers}
+                  selectedLocation={selectedLocation.city}
+                  maxDistance={50}
+                  selectedFarmerId={selectedFarmer?.id}
+                  onFarmerClick={handleFarmerClick}
+                  onMessage={handleFarmerChat}
+                  emptyMessage={`No farmers found for ${selectedLocation.city}`}
+                />
+
+                {selectedFarmer && (
+                  <div ref={selectedFarmerRef} className="rounded-xl border border-green-200 bg-gradient-to-br from-green-50 to-white p-5 shadow-sm">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-wider text-green-700 font-semibold">Selected Farmer</p>
+                        <h2 className="text-lg font-bold text-gray-900 mt-1">
+                          {selectedFarmer.farmName || selectedFarmer.name}
+                        </h2>
+                      </div>
+                      <div className="inline-flex items-center rounded-lg border border-green-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase text-green-700 w-fit shadow-xs">
+                        Profile
+                      </div>
+                    </div>
+                    <FarmerProfileSection user={selectedFarmer} />
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
       </div>
+    </div>
     </div>
   );
 };
