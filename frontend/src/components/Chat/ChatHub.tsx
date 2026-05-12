@@ -20,7 +20,11 @@ interface ChatHubProps {
   subtitle: string;
 }
 
-const buildAvatar = (name: string) => {
+const buildAvatar = (name: string, photoUrl?: string) => {
+  if (photoUrl) {
+    return photoUrl;
+  }
+
   const initials = name
     .split(' ')
     .slice(0, 2)
@@ -117,7 +121,7 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
           farmName: partner?.farmName,
           farmDetails: partner?.farmDetails,
           location: partner?.location ?? 'Local farm',
-          avatar: buildAvatar(partner?.name ?? (isOutgoing ? message.recipientName : message.senderName)),
+          avatar: buildAvatar(partner?.name ?? (isOutgoing ? message.recipientName : message.senderName), partner?.profilePhoto),
           rating: undefined,
           responseTime: undefined,
           isOnline: partner?.role === 'farmer' ? true : false,
@@ -169,7 +173,7 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
         farmName: entry.farmName,
         farmDetails: entry.farmDetails,
         location: entry.location,
-        avatar: buildAvatar(entry.name),
+        avatar: buildAvatar(entry.name, entry.profilePhoto),
         rating: undefined,
         responseTime: undefined,
         isOnline: entry.role === 'farmer',
@@ -252,7 +256,7 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
       farmName: partnerUser.farmName,
       farmDetails: partnerUser.farmDetails,
       location: partnerUser.location,
-      avatar: buildAvatar(partnerUser.name),
+      avatar: buildAvatar(partnerUser.name, partnerUser.profilePhoto),
       rating: undefined,
       responseTime: undefined,
       isOnline: partnerUser.role === 'farmer',
@@ -277,7 +281,7 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
         timestamp: formatTime(message.timestamp),
         avatar:
           message.senderId === currentUser.id
-            ? buildAvatar(currentUser.name)
+            ? buildAvatar(currentUser.name, currentUser.profilePhoto)
             : selectedConversation.avatar,
         read: message.read,
       })

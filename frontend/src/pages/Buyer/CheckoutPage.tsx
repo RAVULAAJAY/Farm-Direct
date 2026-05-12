@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,8 @@ import { CheckCircle, CreditCard, Smartphone, Truck, Wallet, AlertCircle, QrCode
 import { hasBuyerPaymentDetails, useAuth } from '@/context/AuthContext';
 import { CheckoutPaymentMethod, useGlobalState } from '@/context/GlobalStateContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import QRCode from 'qrcode';
+import { buildUpiPaymentUri } from '@/lib/upiPayment';
 
 const CheckoutPage: React.FC = () => {
   const navigate = useNavigate();
@@ -28,6 +30,8 @@ const CheckoutPage: React.FC = () => {
   const [cardError, setCardError] = useState('');
   const [processingPayment, setProcessingPayment] = useState(false);
   const [codConfirmOpen, setCodConfirmOpen] = useState(false);
+  const [generatedQrCodes, setGeneratedQrCodes] = useState<Record<string, string>>({});
+  const [qrGenerationError, setQrGenerationError] = useState('');
 
   const detailedItems = useMemo(
     () =>
@@ -56,19 +60,75 @@ const CheckoutPage: React.FC = () => {
     () =>
       detailedItems.map(({ product, quantity, total }) => {
         const farmerUser = users.find((entry) => entry.id === product.farmerId && entry.role === 'farmer');
+        const farmerName = farmerUser?.name ?? product.farmerName;
+        const farmerUpi = farmerUser?.paymentDetails?.ifscOrUpi ?? '';
 
         return {
           product,
           quantity,
           total,
-          farmerName: farmerUser?.name ?? product.farmerName,
-          farmerUpi: farmerUser?.paymentDetails?.ifscOrUpi ?? '',
-          qrCodeDataUrl: farmerUser?.paymentDetails?.upiQrCodeDataUrl ?? '',
-          qrCodeFileName: farmerUser?.paymentDetails?.upiQrCodeFileName ?? '',
+          farmerName,
+          farmerUpi,
+          paymentUri: farmerUpi
+            ? buildUpiPaymentUri({
+                payeeUpiId: farmerUpi,
+                payeeName: farmerName,
+                amount: total,
+                transactionNote: `Payment for ${product.name}`,
+                transactionRef: `${product.id}-${quantity}`,
+              })
+            : '',
         };
       }),
     [detailedItems, users]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const generateQrCodes = async () => {
+      if (paymentMethod !== 'upi') {
+        setGeneratedQrCodes({});
+        setQrGenerationError('');
+        return;
+      }
+
+      try {
+        const entries = await Promise.all(
+          upiPaymentDetails.map(async ({ product, paymentUri }) => {
+            if (!paymentUri) {
+              return [product.id, ''] as const;
+            }
+
+            const dataUrl = await QRCode.toDataURL(paymentUri, {
+              errorCorrectionLevel: 'M',
+              width: 320,
+              margin: 1,
+            });
+
+            return [product.id, dataUrl] as const;
+          })
+        );
+
+        if (!cancelled) {
+          setGeneratedQrCodes(Object.fromEntries(entries));
+          setQrGenerationError('');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to generate UPI QR codes', error);
+          setGeneratedQrCodes({});
+          setQrGenerationError('Unable to generate a payment QR right now. Please try again.');
+        }
+      }
+    };
+
+    generateQrCodes();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentMethod, upiPaymentDetails]);
 
   const paymentOptions: Array<{ value: CheckoutPaymentMethod; label: string; icon: React.ReactNode }> = [
     { value: 'upi', label: 'UPI', icon: <Smartphone className="h-4 w-4" /> },
@@ -361,12 +421,18 @@ const CheckoutPage: React.FC = () => {
                   <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
                     <QrCode className="h-4 w-4" />
                     <AlertDescription>
-                      Scan the correct farmer QR code shown for each product below. If your cart has items from multiple farmers, each product displays its own QR.
+                      Scan the QR shown for each product. The amount is embedded in the code so supported UPI apps auto-fill the exact payment amount.
                     </AlertDescription>
                   </Alert>
 
+                  {qrGenerationError && (
+                    <Alert className="border-red-200 bg-red-50 text-red-800">
+                      <AlertDescription>{qrGenerationError}</AlertDescription>
+                    </Alert>
+                  )}
+
                   <div className="space-y-4">
-                    {upiPaymentDetails.map(({ product, farmerName, farmerUpi, qrCodeDataUrl, qrCodeFileName, quantity, total }) => (
+                    {upiPaymentDetails.map(({ product, farmerName, farmerUpi, paymentUri, quantity, total }) => (
                       <div key={product.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                           <div className="space-y-2">
@@ -379,23 +445,26 @@ const CheckoutPage: React.FC = () => {
                             <p className="text-sm text-gray-700">
                               UPI ID: {farmerUpi || 'Not added'}
                             </p>
+                            <p className="text-xs text-gray-500">
+                              This QR already includes ₹{total.toFixed(2)} so the buyer does not need to type the amount manually.
+                            </p>
                           </div>
 
                           <div className="flex flex-col items-center gap-2 rounded-lg border bg-gray-50 p-3 lg:min-w-56">
-                            {qrCodeDataUrl ? (
+                            {generatedQrCodes[product.id] ? (
                               <>
                                 <img
-                                  src={qrCodeDataUrl}
-                                  alt={`${farmerName} UPI QR code for ${product.name}`}
+                                  src={generatedQrCodes[product.id]}
+                                  alt={`${farmerName} UPI payment QR code for ${product.name} with amount ₹${total.toFixed(2)}`}
                                   className="h-48 w-48 rounded-md border bg-white object-contain"
                                 />
                                 <p className="text-center text-xs font-medium text-gray-900">
-                                  {qrCodeFileName || `${farmerName} QR`}
+                                  {paymentUri ? `Auto-filled amount: ₹${total.toFixed(2)}` : `${farmerName} QR unavailable`}
                                 </p>
                               </>
                             ) : (
                               <div className="flex h-48 w-48 items-center justify-center rounded-md border border-dashed bg-white text-center text-sm text-gray-500">
-                                No QR code uploaded for this farmer yet.
+                                {farmerUpi ? 'Generating payment QR...' : 'No UPI ID added for this farmer yet.'}
                               </div>
                             )}
                           </div>

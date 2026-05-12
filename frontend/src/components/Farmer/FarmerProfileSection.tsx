@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Edit,
   MapPin,
@@ -45,9 +46,18 @@ const FarmerProfileSection: React.FC<FarmerProfileSectionProps> = ({
           <div className="space-y-6 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-5">
-                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-green-100 text-4xl">
-                  🧑‍🌾
-                </div>
+                <Avatar className="h-24 w-24 border border-green-100 shadow-sm">
+                  <AvatarImage src={user.profilePhoto} alt={user.name} />
+                  <AvatarFallback className="text-2xl font-semibold text-green-700 bg-green-100">
+                    {user.name
+                      .split(' ')
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((part) => part[0])
+                      .join('')
+                      .toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
                 <div>
                   <h2 className="text-3xl font-bold text-gray-900">{user.name}</h2>
                   <p className="text-sm text-gray-600 mt-1">{user.farmName || `${user.name}'s Farm`}</p>
