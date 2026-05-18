@@ -312,7 +312,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout }) => {
           </div>
         </div>
 
-        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm font-medium text-gray-600">
@@ -387,7 +387,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout }) => {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-6 gap-2 bg-white p-1 shadow-sm">
+          <TabsList className="grid w-full grid-cols-2 gap-2 bg-white p-1 shadow-sm sm:grid-cols-3 lg:grid-cols-6">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="farmers">Farmers</TabsTrigger>
             <TabsTrigger value="buyers">Buyers</TabsTrigger>
@@ -461,7 +461,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout }) => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[560px] pr-4">
+                <ScrollArea className="max-h-[70vh] pr-4 sm:h-[560px]">
                   <div className="space-y-4">
                     {filteredFarmers.map(({ farmer, products: farmerProducts }) => (
                       <div key={farmer.id} className="rounded-xl border bg-white p-4 space-y-4">
@@ -582,7 +582,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout }) => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[560px] pr-4">
+                <ScrollArea className="max-h-[70vh] pr-4 sm:h-[560px]">
                   <div className="space-y-3">
                     {filteredBuyers.map(({ buyer, uploadedProducts }) => (
                       <div key={buyer.id} className="rounded-xl border bg-white p-4 space-y-4">
@@ -687,7 +687,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout }) => {
                 <CardDescription>View all listings and remove inappropriate products immediately</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[560px] pr-4">
+                <ScrollArea className="max-h-[70vh] pr-4 sm:h-[560px]">
                   <div className="space-y-3">
                     {filteredProducts.map((product) => (
                       <div key={product.id} className="rounded-xl border bg-white p-4">
@@ -778,7 +778,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout }) => {
                 <CardDescription>Track every transaction and monitor delivery progress in real time</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[560px] pr-4">
+                <ScrollArea className="max-h-[70vh] pr-4 sm:h-[560px]">
                   <div className="space-y-3">
                     {filteredOrders.map((order) => (
                       <div key={order.id} className="rounded-xl border bg-white p-4">
@@ -867,7 +867,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout }) => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[620px] pr-4">
+                <ScrollArea className="max-h-[72vh] pr-4 sm:h-[620px]">
                   <div className="space-y-3">
                     {filteredActivityLogs.map((entry) => (
                       <div key={entry.id} className="rounded-xl border bg-white p-4">

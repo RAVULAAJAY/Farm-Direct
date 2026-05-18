@@ -343,13 +343,13 @@ app.use(express.json({ limit: '10mb' }));
 // Notifications persistence
 const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
 function loadNotifications() {
-  try { return JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE, 'utf8') || '[]'); } catch { return []; }
+  return loadData(NOTIFICATIONS_FILE);
 }
-function saveNotifications(data){ fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(data, null, 2)); }
+function saveNotifications(data){ saveData(NOTIFICATIONS_FILE, data); }
 let notifications = loadNotifications();
 
-function loadOtps(){ try { return JSON.parse(fs.readFileSync(OTPS_FILE, 'utf8') || '[]'); } catch { return []; } }
-function saveOtps(data){ fs.writeFileSync(OTPS_FILE, JSON.stringify(data, null, 2)); }
+function loadOtps(){ return loadData(OTPS_FILE); }
+function saveOtps(data){ saveData(OTPS_FILE, data); }
 let otps = loadOtps();
 
 app.get('/api/users', (req, res) => res.json(users));
@@ -1091,4 +1091,7 @@ try {
 
 app.use((_,res)=>res.status(404).json({error:'Not found'}));
 const listenTarget = PORT || 4000;
-server.listen(listenTarget, ()=>console.log(`API server running at http://localhost:${listenTarget}`));
+
+(async () => {
+  server.listen(listenTarget, ()=>console.log(`API server running at http://localhost:${listenTarget}`));
+})();

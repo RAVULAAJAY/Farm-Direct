@@ -337,7 +337,7 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <div className="space-y-2">
           {filteredConversations.length > 0 ? (
             filteredConversations.map((conversation) => (
@@ -394,7 +394,7 @@ const ChatHub: React.FC<ChatHubProps> = ({ title, subtitle }) => {
           )}
         </div>
 
-        <div className="min-h-[640px]">
+        <div className="min-h-[420px] lg:min-h-[640px]">
           {selectedConversation ? (
             <ChatScreen
               participant={selectedConversation}

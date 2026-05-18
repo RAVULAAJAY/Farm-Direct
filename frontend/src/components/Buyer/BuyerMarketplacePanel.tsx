@@ -256,7 +256,7 @@ const BuyerMarketplacePanel: React.FC = () => {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-gray-600">Products</p>

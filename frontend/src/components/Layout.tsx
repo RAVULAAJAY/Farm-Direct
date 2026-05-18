@@ -32,7 +32,7 @@ const Layout: React.FC<LayoutProps> = ({
   useNotifications();
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-white via-green-50 to-blue-50 overflow-hidden">
+    <div className="flex min-h-dvh w-full overflow-hidden bg-gradient-to-br from-white via-green-50 to-blue-50">
       {/* Sidebar - Hidden on small screens */}
       <div className="hidden md:block shadow-lg">
         <Sidebar
@@ -57,7 +57,7 @@ const Layout: React.FC<LayoutProps> = ({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Navbar */}
         <Navbar
           user={user}
@@ -68,8 +68,8 @@ const Layout: React.FC<LayoutProps> = ({
         />
 
         {/* Page Content - with smooth scroll and animations */}
-        <main className="flex-1 overflow-y-auto scroll-smooth">
-          <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
+        <main className="min-w-0 flex-1 overflow-y-auto scroll-smooth">
+          <div className="mx-auto w-full max-w-7xl px-4 py-4 animate-in fade-in duration-500 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
             {children}
           </div>
         </main>

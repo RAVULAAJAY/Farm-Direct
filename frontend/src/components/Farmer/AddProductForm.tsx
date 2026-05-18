@@ -355,7 +355,7 @@ const AddProductForm: React.FC<AddProductFormProps> = ({
           </div>
 
           {/* Category and Unit */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="category">Category *</Label>
               <Select value={formData.category} onValueChange={(value) => handleSelectChange('category', value)}>
@@ -385,7 +385,7 @@ const AddProductForm: React.FC<AddProductFormProps> = ({
           </div>
 
           {/* Price and Stock */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="price">Price per {formData.unit} (₹) *</Label>
               <Input
@@ -479,11 +479,11 @@ const AddProductForm: React.FC<AddProductFormProps> = ({
           </Alert>
 
           {/* Form Actions */}
-          <div className="flex gap-3 pt-4">
+          <div className="flex flex-col gap-3 pt-4 sm:flex-row">
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="flex-1 bg-green-600 hover:bg-green-700"
+              className="w-full flex-1 bg-green-600 hover:bg-green-700"
             >
               {isSubmitting ? 'Saving...' : submitLabel}
             </Button>
@@ -492,6 +492,7 @@ const AddProductForm: React.FC<AddProductFormProps> = ({
               variant="outline"
               onClick={onCancel}
               disabled={isSubmitting}
+              className="w-full sm:w-auto"
             >
               Cancel
             </Button>

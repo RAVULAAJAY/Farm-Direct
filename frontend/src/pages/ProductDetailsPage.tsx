@@ -293,7 +293,7 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
                 <p className="text-sm text-gray-600">Ratings</p>
                 <p className="text-gray-900">{resolvedFarmer.rating} / 5 ({resolvedFarmer.reviews} reviews)</p>
               </div>
-              <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2">
                 <Button onClick={() => setShowContactDialog(true)} variant="outline" className="gap-2">
                   <MessageCircle className="h-4 w-4" />
                   Contact Farmer
@@ -408,7 +408,7 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
       </div>
 
       <Tabs defaultValue="description" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
           <TabsTrigger value="description">Description</TabsTrigger>
           <TabsTrigger value="farmer">Farmer Profile</TabsTrigger>
           <TabsTrigger value="reviews">Reviews ({reviewStats.count})</TabsTrigger>
@@ -420,7 +420,7 @@ const ProductDetailsPage: React.FC<ProductDetailsPageProps> = ({
               <CardTitle>Product Details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
                 <div>
                   <p className="mb-1 text-sm text-gray-600">Category</p>
                   <p className="font-semibold text-gray-900">{categoryLabels[product.category] ?? 'Other'}</p>

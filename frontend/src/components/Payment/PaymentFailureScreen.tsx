@@ -115,7 +115,7 @@ const PaymentFailureScreen: React.FC<PaymentFailureScreenProps> = ({
           </CardHeader>
           <CardContent className="space-y-4 pt-6">
             {/* Order Amount */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <p className="text-xs text-gray-600 uppercase font-semibold">
                   Amount
@@ -221,7 +221,7 @@ const PaymentFailureScreen: React.FC<PaymentFailureScreenProps> = ({
             Try Different Payment Method
           </Button>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Button
               onClick={onContactSupport}
               variant="outline"

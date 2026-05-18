@@ -129,7 +129,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   return (
     <>
       {/* Overlay for mobile */}
-      {!isOpen && (
+      {isOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-30 md:hidden animate-in fade-in duration-200"
           onClick={() => onToggle && onToggle(false)}
@@ -138,13 +138,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar */}
       <aside
-        className={`fixed md:relative w-64 h-full bg-gradient-to-b from-white via-gray-50 to-white border-r border-gray-100 backdrop-blur-sm z-40 transition-all duration-300 transform ${
+        className={`fixed inset-y-0 left-0 z-40 h-dvh w-[min(18rem,85vw)] border-r border-gray-100 bg-gradient-to-b from-white via-gray-50 to-white shadow-2xl backdrop-blur-sm transition-transform duration-300 transform md:relative md:h-full md:w-64 md:shadow-none ${
           isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
         <div className="h-full flex flex-col overflow-y-auto scroll-smooth">
           {/* Header */}
-          <div className="h-16 border-b border-gray-100 flex items-center justify-between px-6 group">
+          <div className="flex h-16 items-center justify-between border-b border-gray-100 px-4 group sm:px-6">
             <div className="flex items-center gap-3">
               <BrandLogo
                 imageClassName="h-12 w-12 sm:h-14 sm:w-14 transform transition-transform duration-300 group-hover:scale-110"
@@ -176,7 +176,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* Navigation Items */}
-          <nav className="flex-1 px-4 py-4 space-y-1">
+          <nav className="flex-1 px-3 py-4 space-y-1 sm:px-4">
             {filteredItems.map((item, index) => {
               const Icon = item.icon;
               const active = isActive(item.path);
@@ -190,7 +190,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   style={{
                     animationDelay: `${index * 30}ms`,
                   }}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-200 text-left group ${
+                  className={`w-full flex items-center gap-3 rounded-lg px-3 py-3 text-left transition-all duration-200 group sm:px-4 sm:py-2.5 ${
                     active
                       ? `${roleColors.accent} ${roleColors.text} font-semibold shadow-md border-l-4 ${roleColors.border}`
                       : 'text-gray-700 hover:bg-gray-100 font-medium'
@@ -210,7 +210,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </nav>
 
           {/* Bottom Section */}
-          <div className="p-4 border-t border-gray-100 space-y-1">
+          <div className="space-y-1 border-t border-gray-100 p-4">
             <button
               onClick={() => handleNavigate('/profile')}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-gray-700 hover:bg-green-50 hover:text-green-700 font-medium transition-all duration-200 group"

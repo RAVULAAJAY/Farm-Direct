@@ -97,8 +97,51 @@
     @apply border-border;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
+    overflow-x: hidden;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  img,
+  video,
+  canvas,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    word-break: break-word;
+  }
+
+  #root {
+    min-height: 100vh;
   }
 }
 
@@ -254,10 +297,6 @@
     scroll-behavior: smooth;
   }
 
-  html {
-    scroll-behavior: smooth;
-  }
-
   /* Better focus states */
   button:focus-visible,
   a:focus-visible,
@@ -325,5 +364,38 @@
   /* Container queries for modern layouts */
   .container-responsive {
     @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .mobile-safe-padding {
+    @apply px-4 sm:px-6 lg:px-8;
+  }
+
+  @media (max-width: 480px) {
+    .text-responsive {
+      @apply text-base;
+    }
+  }
+
+  @media (min-width: 481px) and (max-width: 768px) {
+    .text-responsive {
+      @apply text-lg;
+    }
+  }
+
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .text-responsive {
+      @apply text-xl;
+    }
+  }
+
+  @media (min-width: 1025px) {
+    .text-responsive {
+      @apply text-2xl;
+    }
   }
 }

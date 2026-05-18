@@ -115,7 +115,7 @@ const ProductList: React.FC<ProductListProps> = ({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-start justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle>
               {isFarmerView ? 'My Products' : 'Browse Products'}
@@ -148,8 +148,8 @@ const ProductList: React.FC<ProductListProps> = ({
           </div>
 
           {/* Filter and Sort Controls */}
-          <div className="flex gap-3 flex-wrap">
-            <div className="flex-1 min-w-48">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <div className="flex-1 min-w-0 sm:min-w-48">
               <Select value={filterCategory} onValueChange={setFilterCategory}>
                 <SelectTrigger>
                   <Filter className="h-4 w-4 mr-2" />
@@ -163,7 +163,7 @@ const ProductList: React.FC<ProductListProps> = ({
               </Select>
             </div>
 
-            <div className="flex-1 min-w-48">
+            <div className="flex-1 min-w-0 sm:min-w-48">
               <Select value={sortBy} onValueChange={setSortBy}>
                 <SelectTrigger>
                   <SelectValue />
@@ -192,7 +192,7 @@ const ProductList: React.FC<ProductListProps> = ({
 
         {/* Products Grid */}
         {filteredAndSortedProducts.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredAndSortedProducts.map(product => (
               <ProductCard
                 key={product.id}
@@ -232,7 +232,7 @@ const ProductList: React.FC<ProductListProps> = ({
 
         {/* Total Info */}
         {filteredAndSortedProducts.length > 0 && (
-          <div className="flex items-center justify-between text-sm text-gray-600 pt-4 border-t">
+          <div className="flex flex-col gap-2 border-t pt-4 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
             <span>Showing {filteredAndSortedProducts.length} of {products.length} products</span>
             {products.length > 0 && (
               <span>

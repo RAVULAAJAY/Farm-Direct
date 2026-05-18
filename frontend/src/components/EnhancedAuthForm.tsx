@@ -119,8 +119,8 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
   const effectiveMode = role === 'admin' ? 'login' : mode;
   const isFarmerSignup = role === 'farmer' && effectiveMode === 'signup';
   const isBuyerSignup = role === 'buyer' && effectiveMode === 'signup';
-  const containerWidthClass = effectiveMode === 'login' ? 'max-w-2xl' : isFarmerSignup ? 'max-w-5xl' : 'max-w-4xl';
-  const compactFieldGroupClass = effectiveMode === 'login' ? 'grid grid-cols-1 gap-4' : 'grid grid-cols-1 md:grid-cols-2 gap-4';
+  const containerWidthClass = effectiveMode === 'login' ? 'max-w-2xl' : isFarmerSignup ? 'max-w-4xl xl:max-w-5xl' : 'max-w-4xl';
+  const compactFieldGroupClass = effectiveMode === 'login' ? 'grid grid-cols-1 gap-4' : 'grid grid-cols-1 gap-4 sm:grid-cols-2';
 
   const passwordStrength = effectiveMode === 'signup' ? getPasswordStrengthLabel(formData.password) : null;
 
@@ -770,7 +770,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
               )}
 
               {effectiveMode === 'signup' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name</Label>
                     <Input
@@ -897,7 +897,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
               )}
 
               {effectiveMode === 'signup' && !isFarmerSignup && !isBuyerSignup && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone Number</Label>
                     <Input
@@ -1069,7 +1069,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                       {fieldErrors.idProof && <p className="text-sm text-red-600">{fieldErrors.idProof}</p>}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="bankName">Bank Name</Label>
                         <Input
@@ -1226,7 +1226,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                       {fieldErrors.address && <p className="text-sm text-red-600">{fieldErrors.address}</p>}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="farmLatitude">Farm Latitude</Label>
                         <Input
@@ -1305,7 +1305,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                       {fieldErrors.idProof && <p className="text-sm text-red-600">{fieldErrors.idProof}</p>}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="bankName">Bank Name (optional if UPI provided)</Label>
                         <Input

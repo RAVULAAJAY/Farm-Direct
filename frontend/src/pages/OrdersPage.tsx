@@ -427,7 +427,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5 md:gap-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5 md:gap-6">
         {[
           { label: 'Pending', value: statusCounts.pending, icon: '⏱️', textColor: 'text-amber-600' },
           { label: 'Accepted', value: statusCounts.accepted, icon: '✅', textColor: 'text-blue-600' },
@@ -484,7 +484,7 @@ const OrdersPage: React.FC<OrdersPageProps> = ({ user }) => {
                     <p className="text-sm text-gray-600">Delivery Status: {formatDeliveryStatus(order.deliveryStatus)}</p>
                   </div>
 
-                  <div className="mb-4 grid grid-cols-2 gap-4 border-b pb-4">
+                  <div className="mb-4 grid grid-cols-1 gap-4 border-b pb-4 sm:grid-cols-2">
                     <div>
                       <p className="text-xs text-gray-600">Order Date</p>
                       <p className="font-medium text-gray-900">{order.orderDate}</p>

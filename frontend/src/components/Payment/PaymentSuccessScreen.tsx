@@ -74,7 +74,7 @@ const PaymentSuccessScreen: React.FC<PaymentSuccessScreenProps> = ({
           </CardHeader>
           <CardContent className="space-y-4 pt-6">
             {/* Order ID and Amount */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <p className="text-xs text-gray-600 uppercase font-semibold">
                   Order ID
@@ -199,7 +199,7 @@ const PaymentSuccessScreen: React.FC<PaymentSuccessScreenProps> = ({
 
         {/* Action Buttons */}
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Button
               onClick={onDownloadInvoice}
               variant="outline"
@@ -218,7 +218,7 @@ const PaymentSuccessScreen: React.FC<PaymentSuccessScreenProps> = ({
             </Button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Button
               onClick={onViewOrder}
               className="bg-green-600 hover:bg-green-700 gap-2"

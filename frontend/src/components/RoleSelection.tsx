@@ -75,7 +75,7 @@ const RoleSelection: React.FC<RoleSelectionProps> = ({ onSelectRole, onBack }) =
             </Button>
           </div>
 
-          <div className="mx-auto max-w-5xl rounded-[2.5rem] border border-white/80 bg-white/75 px-6 py-12 text-center shadow-[0_30px_90px_-35px_rgba(15,23,42,0.34)] backdrop-blur-2xl animate-fade-in-scale sm:px-10">
+          <div className="mx-auto max-w-4xl rounded-[2.5rem] border border-white/80 bg-white/75 px-6 py-12 text-center shadow-[0_30px_90px_-35px_rgba(15,23,42,0.34)] backdrop-blur-2xl animate-fade-in-scale sm:px-10">
             <div className="mx-auto mb-6 h-px w-24 bg-gradient-to-r from-transparent via-emerald-400 to-transparent" />
             <BrandLogo
               className="justify-center mb-3"

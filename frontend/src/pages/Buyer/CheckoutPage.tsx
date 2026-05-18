@@ -396,7 +396,7 @@ const CheckoutPage: React.FC = () => {
                       <Label>Card Number</Label>
                       <Input value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} placeholder="1234 5678 9012 3456" className="mt-2" />
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <div>
                         <Label>Expiry (MM/YY)</Label>
                         <Input value={cardExpiry} onChange={(e) => setCardExpiry(e.target.value)} placeholder="MM/YY" className="mt-2" />

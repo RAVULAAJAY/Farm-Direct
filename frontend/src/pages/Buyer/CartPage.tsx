@@ -86,15 +86,15 @@ const CartPage: React.FC = () => {
             <Card key={item.productId}>
               <CardContent className="pt-5">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex gap-4">
+                  <div className="flex min-w-0 gap-4">
                     {product.image && (
-                      <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 flex-shrink-0">
-                        <img src={product.image} alt={product.name} className="h-20 w-20 object-contain" />
+                      <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 sm:h-24 sm:w-24">
+                        <img src={product.image} alt={product.name} className="h-16 w-16 object-contain sm:h-20 sm:w-20" />
                       </div>
                     )}
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-lg font-semibold text-gray-900">{product.name}</p>
-                      <p className="text-sm text-gray-600">{product.farmerName} • {product.location}</p>
+                      <p className="text-sm text-gray-600 break-words">{product.farmerName} • {product.location}</p>
                       <p className="mt-1 text-sm font-medium text-green-700">₹{product.price.toFixed(2)} / {product.unit}</p>
                       <p className="text-xs text-gray-500">Available: {availableStock} {product.unit}</p>
                     </div>
@@ -127,7 +127,7 @@ const CartPage: React.FC = () => {
                       Remove
                     </Button>
 
-                    <p className="w-24 text-right text-lg font-bold text-gray-900">₹{total.toFixed(2)}</p>
+                    <p className="min-w-24 text-right text-lg font-bold text-gray-900">₹{total.toFixed(2)}</p>
                   </div>
                 </div>
               </CardContent>

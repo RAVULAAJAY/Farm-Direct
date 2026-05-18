@@ -84,7 +84,7 @@ const FavoritesPage: React.FC = () => {
                   <span className="font-semibold text-emerald-700">₹{product.price}/{product.unit}</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Button variant="outline" onClick={() => navigate(`/product/${product.id}`)}>
                     View Details
                   </Button>

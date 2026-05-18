@@ -322,7 +322,7 @@ const FarmerManagementPanel: React.FC = () => {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="border-emerald-100">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -368,7 +368,7 @@ const FarmerManagementPanel: React.FC = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
           <TabsTrigger value="products" className="gap-2">
             <Package className="h-4 w-4" />
             Products

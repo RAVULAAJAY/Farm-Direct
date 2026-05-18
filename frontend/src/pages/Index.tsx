@@ -313,7 +313,15 @@ const Index = () => {
 
         <footer className="border-t border-slate-200/80 py-5 text-center text-sm text-slate-600">
           <span className="inline-flex items-center rounded-full border border-slate-200 bg-white/90 px-4 py-2 font-medium text-slate-700 shadow-sm backdrop-blur-sm">
-            Developed by <span className="ml-1 font-semibold text-emerald-700">Ravula Ajay</span>
+            Developed by{' '}
+            <a
+              href="https://ravula-ajay-portfolio-website.vercel.app/"
+              target="_blank"
+              rel="noreferrer"
+              className="ml-1 font-semibold text-emerald-700 transition-colors hover:text-emerald-800 hover:underline"
+            >
+              Ravula Ajay
+            </a>
           </span>
         </footer>
       </div>

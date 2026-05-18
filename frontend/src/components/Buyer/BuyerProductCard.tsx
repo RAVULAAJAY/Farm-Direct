@@ -82,12 +82,12 @@ const BuyerProductCard: React.FC<BuyerProductCardProps> = ({
     <>
       <Card className="overflow-hidden hover:shadow-lg transition-shadow flex flex-col h-full">
         {/* Image Container */}
-        <div className="relative h-48 bg-gray-100 overflow-hidden group">
+        <div className="relative h-36 overflow-hidden bg-gray-100 group sm:h-40 md:h-48">
           {product.image ? (
             <img
               src={product.image}
               alt={product.name}
-              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-400">
@@ -99,7 +99,7 @@ const BuyerProductCard: React.FC<BuyerProductCardProps> = ({
           )}
 
           {/* Badges */}
-          <div className="absolute top-2 left-2">
+          <div className="absolute left-2 top-2 max-w-[70%]">
             <Badge className={categoryColors[product.category as keyof typeof categoryColors] || categoryColors.other}>
               {categoryLabels[product.category as keyof typeof categoryLabels] || 'Other'}
             </Badge>
@@ -108,7 +108,7 @@ const BuyerProductCard: React.FC<BuyerProductCardProps> = ({
           {/* Favorite Button */}
           <button
             onClick={() => onToggleFavorite?.(product.id)}
-            className="absolute top-2 right-2 bg-white rounded-full p-2 shadow hover:shadow-lg transition-shadow"
+            className="absolute right-2 top-2 rounded-full bg-white p-2 shadow transition-shadow hover:shadow-lg"
           >
             <Heart
               className={`h-5 w-5 ${isFavorite ? 'fill-red-500 text-red-500' : 'text-gray-400 hover:text-red-500'}`}
@@ -194,7 +194,7 @@ const BuyerProductCard: React.FC<BuyerProductCardProps> = ({
             <Button
               onClick={() => setShowQuickAdd(true)}
               disabled={isOutOfStock}
-              className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+              className="w-full gap-2 bg-green-600 text-white hover:bg-green-700"
             >
               <ShoppingCart className="h-4 w-4" />
               {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
@@ -219,12 +219,12 @@ const BuyerProductCard: React.FC<BuyerProductCardProps> = ({
           </DialogHeader>
           <div className="space-y-4">
             {/* Product Info */}
-            <div className="flex gap-4">
+              <div className="flex flex-col gap-4 sm:flex-row">
               {product.image && (
                 <img
                   src={product.image}
                   alt={product.name}
-                  className="w-20 h-20 object-cover rounded"
+                    className="h-20 w-20 rounded object-cover"
                 />
               )}
               <div>
