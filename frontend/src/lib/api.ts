@@ -3,6 +3,8 @@ import { Product, ProductReview, User, Order, Message } from '@/lib/data';
 const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 const API_BASE = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
 
+export { API_BASE };
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },

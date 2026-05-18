@@ -5,6 +5,7 @@ import {
   Order,
 } from '@/lib/data';
 import * as api from '@/lib/api';
+import { API_BASE } from '@/lib/api';
 import * as socket from '@/lib/socket';
 
 export type UserRole = 'farmer' | 'buyer' | 'admin';
@@ -726,7 +727,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
     setActivityLogs((prev) => [nextLog, ...prev].slice(0, 500));
 
     try {
-      await fetch('http://localhost:4000/api/activity', {
+      await fetch(`${API_BASE}/activity`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextLog),

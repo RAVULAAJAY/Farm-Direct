@@ -405,40 +405,38 @@ app.post('/api/auth/send-otp', async (req, res) => {
   otps.push({ email, otpHash, expiresAt });
   saveOtps(otps);
 
-  const mailSent = (async () => {
+  try {
     const smtpHost = process.env.SMTP_HOST;
     if (!smtpHost) {
       console.log(`[OTP] SMTP not configured, OTP for ${email}: ${otp}`);
-      return false;
+      return res.json({ success: true, message: 'OTP generated (SMTP not configured - check console)' });
     }
 
-    try {
-      const transporter = require('nodemailer').createTransport({
-        host: smtpHost,
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
-        auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      });
+    const transporter = require('nodemailer').createTransport({
+      host: smtpHost,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+    });
 
-      await transporter.sendMail({
-        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
-        to: email,
-        subject: 'Your verification code',
-        text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
-        html: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
-      });
-      return true;
-    } catch (e) {
-      console.warn('[OTP] email send failed, falling back to console', e && e.message ? e.message : e);
-      console.log(`[OTP] OTP for ${email}: ${otp}`);
-      return false;
-    }
-  })();
+    // Verify connection before sending
+    await transporter.verify();
+    console.log('[OTP] SMTP connection verified');
 
-  // fire-and-forget
-  void mailSent;
-
-  res.json({ success: true });
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+      to: email,
+      subject: 'Your verification code',
+      text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
+      html: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
+    });
+    console.log(`[OTP] Email sent to ${email}. Message ID: ${info.messageId}`);
+    res.json({ success: true, message: 'OTP sent to your email' });
+  } catch (e) {
+    console.error('[OTP] Email send failed:', e && e.message ? e.message : e);
+    console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+    res.status(500).json({ error: 'Failed to send OTP. Please try again.', fallback: `OTP: ${otp}` });
+  }
 });
 
 // Verify OTP

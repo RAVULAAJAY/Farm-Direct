@@ -37,3 +37,6 @@ tmp/
 # Logs
 *.log
 logs/
+
+# Documentation (deployment docs, setup guides)
+99-docs/
