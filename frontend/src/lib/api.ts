@@ -1,6 +1,8 @@
 import { Product, ProductReview, User, Order, Message } from '@/lib/data';
 
-const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+const isLocalHost = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+const defaultApiBase = isLocalHost ? 'http://localhost:4000/api' : 'https://farm-direct-api.onrender.com/api';
+const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? defaultApiBase;
 const API_BASE = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
 
 export { API_BASE };

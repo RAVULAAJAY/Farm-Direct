@@ -1134,7 +1134,8 @@ try {
 
 app.use((_,res)=>res.status(404).json({error:'Not found'}));
 const listenTarget = PORT || 4000;
+const listenHost = process.env.HOST || '0.0.0.0';
 
 (async () => {
-  server.listen(listenTarget, ()=>console.log(`API server running at http://localhost:${listenTarget}`));
+  server.listen(listenTarget, listenHost, () => console.log(`API server running on ${listenHost}:${listenTarget}`));
 })();
