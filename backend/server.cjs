@@ -336,15 +336,17 @@ if (users.length === 0) {
 
 const app = express();
 const allowedOrigins = [
-  'https://farm-direct-zeta-swart.vercel.app',
+  process.env.CORS_ORIGIN,
+  process.env.FRONTEND_BASE,
   'http://localhost:8080',
   'http://localhost:3000',
-];
+].filter(Boolean);
 app.use(cors({
   origin: function(origin, callback) {
     // allow requests with no origin (like mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
     return callback(new Error('CORS not allowed from this origin: ' + origin), false);
   },
   credentials: true,
