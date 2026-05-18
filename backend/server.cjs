@@ -18,15 +18,17 @@ if (SMTP_HOST) {
       port: Number(process.env.SMTP_PORT || 587),
       secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
+      // Render free instances can have slower warm-up/network handshake times.
+      connectionTimeout: 30000,
+      socketTimeout: 30000,
     });
 
     smtpTransporter.verify().then(() => {
       console.log(`[SMTP] Connected to ${SMTP_HOST}`);
     }).catch((err) => {
       console.warn(`[SMTP] Verification failed: ${err && err.message ? err.message : err}`);
-      smtpTransporter = null;
+      // Keep the transporter alive so runtime send attempts can still succeed
+      // even when startup verification is temporarily unavailable.
     });
   } catch (e) {
     console.warn('[SMTP] Initialization failed, emails will be logged to console', e && e.message ? e.message : e);
