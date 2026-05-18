@@ -119,7 +119,7 @@ frontend/
 Update `.env` based on `.env.example`:
 
 ```env
-VITE_API_BASE_URL=http://localhost:4000
+VITE_API_BASE=http://localhost:4000/api
 VITE_APP_NAME=Farm Direct
 ```
 
@@ -154,7 +154,7 @@ npm run dev -- --port 3000
 
 ### API connection issues
 - Ensure backend is running on `http://localhost:4000`
-- Check `.env` file has correct `VITE_API_BASE_URL`
+- Check `.env` file has correct `VITE_API_BASE` (or `VITE_API_BASE_URL`)
 - Check browser console for CORS errors
 
 ### Module not found errors

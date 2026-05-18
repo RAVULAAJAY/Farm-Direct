@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 
-const SERVER = (import.meta.env.VITE_API_BASE ?? 'http://localhost:4000/api').replace(/\/api\/?$/, '');
+const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+const SERVER = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '');
 
 let socket: Socket | null = null;
 

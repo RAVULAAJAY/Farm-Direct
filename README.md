@@ -74,4 +74,4 @@ Farm-Direct/
 ## Notes
 
 - The root README exists so GitHub shows project documentation at the repository level.
-- The full application code and deeper documentation live in `harvest-connect-mobile-main/`.
+- The active application lives in the `frontend/` and `backend/` folders.
