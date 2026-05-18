@@ -414,17 +414,60 @@ app.post('/api/auth/send-otp', async (req, res) => {
     }
 
     const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || 'no-reply@farm-direct.local';
-    const info = await smtpTransporter.sendMail({
-      from: fromAddress,
-      to: email,
-      subject: 'Your verification code',
-      text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
-      html: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
-    });
-    console.log(`[OTP] Email sent to ${email}. Message ID: ${info.messageId}`);
-    res.json({ success: true, message: 'OTP sent to your email' });
+    try {
+      const info = await smtpTransporter.sendMail({
+        from: fromAddress,
+        to: email,
+        subject: 'Your verification code',
+        text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
+        html: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
+      });
+      console.log(`[OTP] SMTP Email sent to ${email}. Message ID: ${info.messageId}`);
+      return res.json({ success: true, message: 'OTP sent to your email' });
+    } catch (smtpErr) {
+      console.warn('[OTP] SMTP send failed, attempting Brevo HTTP API fallback:', smtpErr && smtpErr.message ? smtpErr.message : smtpErr);
+
+      // Try Brevo HTTP API fallback if API key is available
+      const brevoKey = process.env.BREVO_API_KEY;
+      if (!brevoKey) {
+        console.error('[OTP] No BREVO_API_KEY configured; cannot fallback to HTTP API');
+        console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+        return res.status(500).json({ error: 'Failed to send OTP (SMTP failed)', fallback: `OTP: ${otp}` });
+      }
+
+      try {
+        const body = {
+          sender: { name: 'FarmDirect', email: fromAddress },
+          to: [{ email }],
+          subject: 'Your verification code',
+          textContent: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
+          htmlContent: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
+        };
+
+        const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: { 'api-key': brevoKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => 'no response body');
+          console.error('[OTP] Brevo API send failed', resp.status, text);
+          console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+          return res.status(500).json({ error: 'Failed to send OTP (Brevo API failed)', fallback: `OTP: ${otp}` });
+        }
+
+        const data = await resp.json().catch(() => ({}));
+        console.log('[OTP] Brevo API email sent', data);
+        return res.json({ success: true, message: 'OTP sent via Brevo API' });
+      } catch (apiErr) {
+        console.error('[OTP] Brevo API send failed:', apiErr && apiErr.message ? apiErr.message : apiErr);
+        console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+        return res.status(500).json({ error: 'Failed to send OTP (API fallback failed)', fallback: `OTP: ${otp}` });
+      }
+    }
   } catch (e) {
-    console.error('[OTP] Email send failed:', e && e.message ? e.message : e);
+    console.error('[OTP] Unexpected error in send-otp:', e && e.message ? e.message : e);
     console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
     res.status(500).json({ error: 'Failed to send OTP. Please try again.', fallback: `OTP: ${otp}` });
   }
