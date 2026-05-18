@@ -430,9 +430,11 @@ app.post('/api/auth/send-otp', async (req, res) => {
       // Try Brevo HTTP API fallback if API key is available
       const brevoKey = process.env.BREVO_API_KEY;
       if (!brevoKey) {
-        console.error('[OTP] No BREVO_API_KEY configured; cannot fallback to HTTP API');
+        console.error('[OTP] No BREVO_API_KEY in env; SMTP failed and API fallback not available');
+        console.error('[OTP] SMTP Error details:', smtpErr);
         console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
-        return res.status(500).json({ error: 'Failed to send OTP (SMTP failed)', fallback: `OTP: ${otp}` });
+        const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+        return res.status(500).json({ error: 'Failed to send OTP (SMTP failed, no API key)', fallback: debugOtp, debugOtp });
       }
 
       try {
@@ -452,24 +454,27 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
         if (!resp.ok) {
           const text = await resp.text().catch(() => 'no response body');
-          console.error('[OTP] Brevo API send failed', resp.status, text);
+          console.error('[OTP] Brevo HTTP API send failed:', resp.status, text);
           console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
-          return res.status(500).json({ error: 'Failed to send OTP (Brevo API failed)', fallback: `OTP: ${otp}` });
+          const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+          return res.status(500).json({ error: 'Failed to send OTP (Brevo API failed)', fallback: debugOtp, debugOtp, brevoStatus: resp.status });
         }
 
         const data = await resp.json().catch(() => ({}));
-        console.log('[OTP] Brevo API email sent', data);
+        console.log('[OTP] Brevo HTTP API email sent successfully', data);
         return res.json({ success: true, message: 'OTP sent via Brevo API' });
       } catch (apiErr) {
-        console.error('[OTP] Brevo API send failed:', apiErr && apiErr.message ? apiErr.message : apiErr);
+        console.error('[OTP] Brevo API HTTP request failed:', apiErr && apiErr.message ? apiErr.message : apiErr);
         console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
-        return res.status(500).json({ error: 'Failed to send OTP (API fallback failed)', fallback: `OTP: ${otp}` });
+        const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+        return res.status(500).json({ error: 'Failed to send OTP (API HTTP failed)', fallback: debugOtp, debugOtp });
       }
     }
   } catch (e) {
     console.error('[OTP] Unexpected error in send-otp:', e && e.message ? e.message : e);
     console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
-    res.status(500).json({ error: 'Failed to send OTP. Please try again.', fallback: `OTP: ${otp}` });
+    const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+    res.status(500).json({ error: 'Failed to send OTP. Please try again.', fallback: debugOtp, debugOtp });
   }
 });
 
@@ -1169,6 +1174,25 @@ try {
 app.use((_,res)=>res.status(404).json({error:'Not found'}));
 const listenTarget = PORT || 4000;
 const listenHost = process.env.HOST || '0.0.0.0';
+
+// Debug endpoint to check SMTP and OTP configuration
+app.get('/api/debug/otp-config', (req, res) => {
+  if (process.env.DEBUG_OTP !== 'true') return res.status(403).json({ error: 'Debug mode not enabled' });
+  res.json({
+    smtp: {
+      host: process.env.SMTP_HOST ? '✓ set' : '✗ missing',
+      port: process.env.SMTP_PORT ? '✓ ' + process.env.SMTP_PORT : '✗ missing',
+      secure: process.env.SMTP_SECURE ? '✓ ' + process.env.SMTP_SECURE : '✗ missing (default: false)',
+      user: process.env.SMTP_USER ? '✓ set' : '✗ missing',
+      pass: process.env.SMTP_PASS ? '✓ set (' + process.env.SMTP_PASS.substring(0, 10) + '...)' : '✗ missing',
+      emailFrom: process.env.EMAIL_FROM ? '✓ ' + process.env.EMAIL_FROM : '✗ missing',
+    },
+    brevo: {
+      apiKey: process.env.BREVO_API_KEY ? '✓ set (' + process.env.BREVO_API_KEY.substring(0, 10) + '...)' : '✗ missing',
+    },
+    transporter: smtpTransporter ? '✓ initialized' : '✗ not initialized',
+  });
+});
 
 (async () => {
   server.listen(listenTarget, listenHost, () => console.log(`API server running on ${listenHost}:${listenTarget}`));
