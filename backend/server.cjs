@@ -23,13 +23,9 @@ if (SMTP_HOST) {
       socketTimeout: 30000,
     });
 
-    smtpTransporter.verify().then(() => {
-      console.log(`[SMTP] Connected to ${SMTP_HOST}`);
-    }).catch((err) => {
-      console.warn(`[SMTP] Verification failed: ${err && err.message ? err.message : err}`);
-      // Keep the transporter alive so runtime send attempts can still succeed
-      // even when startup verification is temporarily unavailable.
-    });
+    // Skip startup verify to avoid cold-start/network probe timeouts on Render.
+    // Runtime send attempts are still performed and logged with exact errors.
+    console.log(`[SMTP] Configured for host ${SMTP_HOST}; verification deferred to first send attempt.`);
   } catch (e) {
     console.warn('[SMTP] Initialization failed, emails will be logged to console', e && e.message ? e.message : e);
     smtpTransporter = null;
