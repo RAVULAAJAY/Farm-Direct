@@ -337,7 +337,20 @@ if (users.length === 0) {
 }
 
 const app = express();
-app.use(cors());
+const allowedOrigins = [
+  'https://farm-direct-zeta-swart.vercel.app',
+  'http://localhost:8080',
+  'http://localhost:3000',
+];
+app.use(cors({
+  origin: function(origin, callback) {
+    // allow requests with no origin (like mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS not allowed from this origin: ' + origin), false);
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Notifications persistence
@@ -460,14 +473,31 @@ app.post('/api/auth/verify-otp', (req, res) => {
 app.put('/api/users/:id', (req, res) => {
   const idx = users.findIndex((u) => u.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'User not found' });
+  
   // Allow password change via PUT (hash securely)
   const updates = { ...req.body };
   if (typeof updates.password === 'string' && updates.password.length > 0) {
+    // SECURITY: Require old password verification
+    if (!updates.oldPassword) {
+      return res.status(400).json({ error: 'Current password required to change password' });
+    }
+    
+    try {
+      // Verify old password
+      const oldDerived = crypto.scryptSync(String(updates.oldPassword), users[idx].passwordSalt || '', 64).toString('hex');
+      if (oldDerived !== users[idx].passwordHash) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+    } catch (e) {
+      return res.status(500).json({ error: 'Unable to verify password' });
+    }
+    
     const salt = crypto.randomBytes(16).toString('hex');
     const derived = crypto.scryptSync(updates.password, salt, 64).toString('hex');
     updates.passwordSalt = salt;
     updates.passwordHash = derived;
     delete updates.password;
+    delete updates.oldPassword;
   }
 
   users[idx] = { ...users[idx], ...updates };
@@ -573,7 +603,9 @@ app.post('/api/orders', (req, res) => {
     saveNotifications(notifications);
     if (io) io.to(`user_${order.farmerId}`).emit('notification:new', notif);
     if (io) io.to(`user_${order.farmerId}`).emit('order:placed', order);
-  } catch(e) {}
+  } catch(e) {
+    console.error('[Orders] Error notifying farmer of new order:', e && e.message ? e.message : e);
+  }
 
   void sendOrderPlacementEmails(order);
 
@@ -725,14 +757,13 @@ app.post('/api/auth/forgot', async (req, res) => {
   }
 
   if (!emailed) {
-    console.log(`Password reset link for ${email}: ${resetLink}`);
+    // Log only for debugging purposes when SMTP not available
+    if ((process.env.NODE_ENV || 'development') === 'development') {
+      console.log(`[DEV] Password reset link for ${email} (check email first, this is fallback)`);
+    }
   }
 
-  // In debug mode optionally return reset link (do not enable in production)
-  if ((process.env.DEBUG_PASSWORD_RESET || '').toLowerCase() === 'true') {
-    return res.json({ success: true, debugLink: resetLink });
-  }
-
+  // SECURITY: Never return reset token in response
   res.json({ success: true });
 });
 
@@ -741,6 +772,11 @@ app.post('/api/auth/reset', (req, res) => {
   const { email, token, password } = req.body || {};
   if (!email || !token || !password) {
     return res.status(400).json({ error: 'Email, token and new password are required' });
+  }
+
+  // Validate password complexity: min 8 chars, upper, lower, number
+  if (!String(password).match(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/)) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters with uppercase, lowercase, and numbers' });
   }
 
   const user = users.find((u) => (u.email || '').trim().toLowerCase() === String(email).trim().toLowerCase());
@@ -1071,16 +1107,27 @@ try {
       try {
         const userId = String(data?.userId || data);
         if (userId) socket.join(`user_${userId}`);
-      } catch (e) {}
+      } catch (e) {
+        console.error('[Socket.IO] Error joining user room:', e && e.message ? e.message : e);
+      }
     });
 
     socket.on('leave', (data) => {
-      try { const userId = String(data?.userId || data); if (userId) socket.leave(`user_${userId}`); } catch(e){}
+      try {
+        const userId = String(data?.userId || data);
+        if (userId) socket.leave(`user_${userId}`);
+      } catch(e) {
+        console.error('[Socket.IO] Error leaving user room:', e && e.message ? e.message : e);
+      }
     });
 
     socket.on('cart:update', (payload) => {
       // payload: { userId, count }
-      try { if (payload && payload.userId) io.to(`user_${payload.userId}`).emit('cart:update', payload); } catch(e){}
+      try {
+        if (payload && payload.userId) io.to(`user_${payload.userId}`).emit('cart:update', payload);
+      } catch(e) {
+        console.error('[Socket.IO] Error broadcasting cart update:', e && e.message ? e.message : e);
+      }
     });
 
     socket.on('disconnect', () => {});
