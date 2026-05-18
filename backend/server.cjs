@@ -408,25 +408,14 @@ app.post('/api/auth/send-otp', async (req, res) => {
   saveOtps(otps);
 
   try {
-    const smtpHost = process.env.SMTP_HOST;
-    if (!smtpHost) {
+    if (!smtpTransporter) {
       console.log(`[OTP] SMTP not configured, OTP for ${email}: ${otp}`);
       return res.json({ success: true, message: 'OTP generated (SMTP not configured - check console)' });
     }
 
-    const transporter = require('nodemailer').createTransport({
-      host: smtpHost,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-    });
-
-    // Verify connection before sending
-    await transporter.verify();
-    console.log('[OTP] SMTP connection verified');
-
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+    const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || 'no-reply@farm-direct.local';
+    const info = await smtpTransporter.sendMail({
+      from: fromAddress,
       to: email,
       subject: 'Your verification code',
       text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
