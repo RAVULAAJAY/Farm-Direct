@@ -1160,10 +1160,17 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       const safeQuantity = Math.max(1, Math.min(quantity, availableStock));
       const deliveryOption = deliveryInput?.option ?? 'delivery';
 
+      // Build order payload with explicit email fields so backend receives them
+      const orderId = `order_${Date.now()}`;
+      const farmerUser = users.find((u) => String(u.id) === String(productInState.farmerId));
+
       const order: Order = {
-        id: `order_${Date.now()}`,
+        id: orderId,
+        orderId,
         buyerId: currentUser.id,
+        buyerEmail: currentUser.email,
         farmerId: productInState.farmerId,
+        farmerEmail: farmerUser?.email || '',
         productId: productInState.id,
         productName: productInState.name,
         quantity: safeQuantity,

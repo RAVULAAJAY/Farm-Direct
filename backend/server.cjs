@@ -507,15 +507,29 @@ app.delete('/api/products/:id', (req, res) => {
 
 app.get('/api/orders', (req, res) => res.json(orders));
 app.post('/api/orders', (req, res) => {
+  console.log('[Orders] Incoming order body:', req.body);
+
+  // Resolve party and product data for fallbacks
+  const buyer = users.find((u) => String(u.id) === String(req.body.buyerId));
+  const farmer = users.find((u) => String(u.id) === String(req.body.farmerId));
+  const product = products.find((p) => String(p.id) === String(req.body.productId));
+
   const order = {
     id: uuidv4(),
     ...req.body,
+    // Ensure fallback values are present for email and product fields
+    buyerEmail: req.body.buyerEmail || (buyer && buyer.email) || '',
+    farmerEmail: req.body.farmerEmail || (farmer && farmer.email) || '',
+    productName: req.body.productName || (product && product.name) || '',
+    buyerName: req.body.buyerName || (buyer && buyer.name) || '',
+    farmerName: req.body.farmerName || (farmer && farmer.name) || '',
     orderDate: new Date().toISOString().split('T')[0],
     createdAt: new Date().toISOString(),
-    status: 'pending',
-    deliveryStatus: 'pending',
+    status: req.body.status || 'pending',
+    deliveryStatus: req.body.deliveryStatus || 'pending',
     paymentStatus: req.body.paymentStatus || (req.body.paymentMethod === 'cod' ? 'pending' : 'paid'),
   };
+
   orders.push(order);
   saveData(ORDERS_FILE, orders);
   activityLogs.unshift({ id: uuidv4(), userId: order.buyerId, userName: order.buyerName, userRole: 'buyer', action: 'placed order', targetId: order.id, targetType: 'order', timestamp: new Date().toISOString() });
@@ -540,16 +554,27 @@ app.post('/api/orders', (req, res) => {
     console.error('[Orders] Error notifying farmer of new order:', e && e.message ? e.message : e);
   }
 
-  // Log order created and key fields for debugging
+  // Log order created and key fields for debugging (including the final resolved object)
   try {
     console.log('[Orders] Created order:', order.id, 'product:', order.productName, 'quantity:', order.quantity, 'totalPrice:', order.totalPrice);
     console.log('[Orders] Buyer email:', order.buyerEmail, 'Farmer email:', order.farmerEmail);
+    console.log('[Orders] Final order object:', order);
   } catch (e) {}
 
-  // Trigger order-related emails (fire-and-forget)
+  // Trigger order-related emails (fire-and-forget) only when required fields are present
   try {
-    console.log('[Orders] Triggering sendOrderPlacementEmails for', order.id);
-    void sendOrderPlacementEmails(order);
+    if (!order.buyerEmail) {
+      console.error('[Orders] Missing buyerEmail for order', order.id);
+    }
+    if (!order.farmerEmail) {
+      console.error('[Orders] Missing farmerEmail for order', order.id);
+    }
+    if (order.buyerEmail && order.farmerEmail) {
+      console.log('[Orders] Triggering sendOrderPlacementEmails for', order.id);
+      void sendOrderPlacementEmails(order);
+    } else {
+      console.warn('[Orders] Skipping email sends due to missing email addresses for order', order.id);
+    }
   } catch (e) {
     console.error('[Orders] Failed to trigger order emails for', order.id, e);
   }

@@ -53,6 +53,11 @@ export interface Order {
   farmerId: string;
   productId: string;
   productName: string;
+  // Optional email fields included when sending to backend
+  buyerEmail?: string;
+  farmerEmail?: string;
+  // Optional client-side order identifier (frontend-friendly)
+  orderId?: string;
   quantity: number;
   totalPrice: number;
   deliveryOption: 'pickup' | 'delivery';
