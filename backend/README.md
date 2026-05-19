@@ -14,7 +14,7 @@ npm install
 npm start
 ```
 
-The server will run on `http://localhost:4000`
+The server will run on `http://localhost:4000` in development and on the Render service URL in production.
 
 ## API Endpoints
 
@@ -65,13 +65,14 @@ The backend uses JSON files for data storage:
 
 To send real password reset emails, configure these environment variables before starting the backend:
 
-- `FRONTEND_BASE` - public frontend URL used in reset links, for example `http://localhost:8080`
+- `FRONTEND_URL` - public frontend URL used in reset links, for example `https://your-app.vercel.app`
 - `SMTP_HOST` - your SMTP server host
 - `SMTP_PORT` - SMTP port, usually `587`
-- `SMTP_SECURE` - set to `true` for SSL/TLS connections, otherwise `false`
-- `SMTP_USER` - SMTP username
-- `SMTP_PASS` - SMTP password or app password
-- `EMAIL_FROM` - sender address shown in reset emails
+- `SMTP_LOGIN` - SMTP username/login
+- `SMTP_KEY` - SMTP password or app password
+- `FROM_EMAIL` - sender address shown in reset emails and OTP emails
 - `DEBUG_PASSWORD_RESET` - set to `true` in development only if you want the API to return a debug reset link
 
 When a user submits the forgot-password form, the backend stores a one-hour reset token, emails a reset link, and the reset page at `/reset-password` lets the user set a new password.
+
+OTP emails use the same SMTP credentials and are sent from the `/api/auth/send-otp` and `/api/auth/resend-otp` endpoints.

@@ -8,14 +8,14 @@
 **Location:** `backend/.env`
 
 **What Changed:**
-- ✅ Updated SMTP_PASS from old credentials to NEW credentials
+- ✅ Updated SMTP_LOGIN / SMTP_KEY / FROM_EMAIL to the new SMTP-only names
 - ✅ Added DEBUG_OTP and DEBUG_LOGGING settings
 
 **Key Lines:**
 ```
-SMTP_USER=aae4db001@smtp-brevo.com
-SMTP_PASS=<REDACTED_SMTP_PASS>
-EMAIL_FROM=farmdirectt2026@gmail.com
+SMTP_LOGIN=aae4db001@smtp-brevo.com
+SMTP_KEY=<REDACTED_SMTP_KEY>
+FROM_EMAIL=farmdirectt2026@gmail.com
 DEBUG_OTP=true
 DEBUG_LOGGING=true
 ```
@@ -34,12 +34,11 @@ DEBUG_LOGGING=true
 ```
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=aae4db001@smtp-brevo.com
-SMTP_PASS=<REDACTED_SMTP_PASS>
-EMAIL_FROM=farmdirectt2026@gmail.com
+SMTP_LOGIN=aae4db001@smtp-brevo.com
+SMTP_KEY=<REDACTED_SMTP_KEY>
+FROM_EMAIL=farmdirectt2026@gmail.com
 CORS_ORIGIN=https://farm-direct-dusky.vercel.app
-FRONTEND_BASE=https://farm-direct-dusky.vercel.app
+FRONTEND_URL=https://farm-direct-dusky.vercel.app
 NODE_ENV=production
 PORT=4000
 DEBUG_OTP=false

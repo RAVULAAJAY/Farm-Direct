@@ -179,6 +179,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
       console.log('[OTP] Response:', response);
       
       setOtpSent(true);
+      setOtpValue('');
       setEmailVerified(false);
       setGeneralError('');
       
@@ -225,6 +226,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
       console.log('[OTP Verify] Response:', response);
       
       setEmailVerified(true);
+      setOtpValue('');
       setGeneralError('');
       setFieldErrors({});
       
@@ -667,9 +669,16 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
       if (submitMode === 'login' && !existingUser) {
         try {
           const remoteUsers = await fetchUsers();
-          existingUser = remoteUsers.find(
+          const remoteUser = remoteUsers.find(
             (entry) => entry.email.trim().toLowerCase() === normalizedEmail && entry.role === role
           );
+          existingUser = remoteUser
+            ? ({
+                ...remoteUser,
+                phone: remoteUser.phone ?? '',
+                location: remoteUser.location ?? '',
+              } as User)
+            : undefined;
         } catch {
           // Keep existing behavior below when remote lookup is unavailable.
         }

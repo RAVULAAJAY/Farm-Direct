@@ -15,12 +15,11 @@ KEY                    VALUE
 ========================================
 SMTP_HOST              smtp-relay.brevo.com
 SMTP_PORT              587
-SMTP_SECURE            false
-SMTP_USER              aae4db001@smtp-brevo.com
-SMTP_PASS              <REDACTED_SMTP_PASS>
-EMAIL_FROM             farmdirectt2026@gmail.com
+SMTP_LOGIN             aae4db001@smtp-brevo.com
+SMTP_KEY               <REDACTED_SMTP_KEY>
+FROM_EMAIL             farmdirectt2026@gmail.com
 CORS_ORIGIN            https://farm-direct-zeta-swart.vercel.app
-FRONTEND_BASE          https://farm-direct-zeta-swart.vercel.app
+FRONTEND_URL           https://farm-direct-zeta-swart.vercel.app
 NODE_ENV               production
 PORT                   4000
 DEBUG_OTP              false
@@ -32,7 +31,7 @@ AUTO_WISH_MESSAGE      Good morning from Farm Direct! Have a great day.
 ```
 
 **IMPORTANT NOTES:**
-- ⚠️ The `SMTP_PASS` is very long - copy carefully, no typos!
+- ⚠️ The `SMTP_KEY` is very long - copy carefully, no typos!
 - ⚠️ Must have `https://` in CORS_ORIGIN
 - ⚠️ After adding variables, click "Save" and then "Manual Deploy" or redeploy via git
 - ⚠️ Wait 2-3 minutes for changes to take effect
@@ -73,7 +72,7 @@ VITE_APP_NAME          Farm Direct
 ### **Test Render backend is updated:**
 ```bash
 # Check Render logs should contain:
-[SMTP] Configured for host smtp-relay.brevo.com
+[SMTP] Configured for host smtp-relay.brevo.com:587 using login aae4db001@smtp-brevo.com
 [CORS] Configured allowed origins: [ 'https://farm-direct-dusky.vercel.app', ... ]
 ```
 
@@ -95,7 +94,7 @@ curl -X POST https://farm-direct-api.onrender.com/api/auth/send-otp \
 {"success":true,"message":"OTP sent to your email"}
 
 # Check Render logs for:
-[OTP SEND] ✓ SMTP Email sent successfully to your-email@example.com
+[OTP SEND] ✓ SMTP email sent successfully to your-email@example.com
 ```
 
 ---
@@ -119,7 +118,7 @@ aae4db001@smtp-brevo.com
 
 **SMTP Key (Password):**
 ```
-<REDACTED_SMTP_PASS>
+<REDACTED_SMTP_KEY>
 ```
 
 **From Email:**
@@ -166,7 +165,7 @@ farmdirectt2026@gmail.com
 
 ## ⚠️ Common Mistakes
 
-❌ **Wrong:** Copying SMTP_PASS with extra spaces  
+❌ **Wrong:** Copying SMTP_KEY with extra spaces  
 ✅ **Right:** Copy exactly as shown, no spaces
 
 ❌ **Wrong:** CORS_ORIGIN without https://  
@@ -184,7 +183,7 @@ farmdirectt2026@gmail.com
 
 ### **OTP not sending:**
 1. Check Render logs for `[OTP SEND] ✗`
-2. Verify SMTP_PASS is correct (copy-paste again)
+2. Verify SMTP_KEY is correct (copy-paste again)
 3. Set `DEBUG_OTP=true` temporarily to see actual OTP
 
 ### **CORS error in console:**

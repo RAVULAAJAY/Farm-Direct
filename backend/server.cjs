@@ -9,29 +9,42 @@ const { v4: uuidv4 } = require('uuid');
 
 // Initialize SMTP transporter once (reuse for all emails)
 let smtpTransporter = null;
-const SMTP_HOST = process.env.SMTP_HOST;
-if (SMTP_HOST) {
+const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_LOGIN = String(process.env.SMTP_LOGIN || '').trim();
+const SMTP_KEY = String(process.env.SMTP_KEY || '').trim();
+const FROM_EMAIL = String(process.env.FROM_EMAIL || '').trim();
+
+function getFromAddress() {
+  return FROM_EMAIL || SMTP_LOGIN || 'no-reply@farm-direct.local';
+}
+
+if (SMTP_HOST && SMTP_LOGIN && SMTP_KEY) {
   try {
     const nodemailer = require('nodemailer');
     smtpTransporter = nodemailer.createTransport({
       host: SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      // Render free instances can have slower warm-up/network handshake times.
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: {
+        user: SMTP_LOGIN,
+        pass: SMTP_KEY,
+      },
       connectionTimeout: 30000,
       socketTimeout: 30000,
     });
 
-    // Skip startup verify to avoid cold-start/network probe timeouts on Render.
-    // Runtime send attempts are still performed and logged with exact errors.
-    console.log(`[SMTP] Configured for host ${SMTP_HOST}; verification deferred to first send attempt.`);
+    console.log(`[SMTP] Configured for host ${SMTP_HOST}:${SMTP_PORT} using login ${SMTP_LOGIN}`);
+    void smtpTransporter
+      .verify()
+      .then(() => console.log('[SMTP] Transport verification successful'))
+      .catch((error) => console.warn('[SMTP] Transport verification failed:', error?.message || error));
   } catch (e) {
     console.warn('[SMTP] Initialization failed, emails will be logged to console', e && e.message ? e.message : e);
     smtpTransporter = null;
   }
 } else {
-  console.log('[SMTP] Not configured - outgoing emails will be logged to the server console');
+  console.warn('[SMTP] Missing SMTP_HOST, SMTP_LOGIN, or SMTP_KEY - outgoing emails will be logged to the server console');
 }
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -86,7 +99,7 @@ const AUTO_WISH_MESSAGE = process.env.AUTO_WISH_MESSAGE || 'Good morning from Fa
 
 function getFrontendBase(req) {
   const requestOrigin = typeof req?.headers?.origin === 'string' ? req.headers.origin.trim() : '';
-  const configuredBase = (process.env.FRONTEND_BASE || 'http://localhost:8080').trim();
+  const configuredBase = String(process.env.FRONTEND_URL || '').trim();
   return (requestOrigin || configuredBase).replace(/\/$/, '');
 }
 
@@ -100,7 +113,7 @@ async function sendPasswordResetEmail({ email, resetLink }) {
     try {
       console.log(`[Password Reset] Sending email to ${email} via configured SMTP...`);
       const info = await smtpTransporter.sendMail({
-        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        from: getFromAddress(),
         to: email,
         subject: 'Password reset request',
         text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
@@ -125,7 +138,7 @@ async function sendTransactionalEmail({ to, subject, text, html, tag }) {
   if (smtpTransporter) {
     try {
       await smtpTransporter.sendMail({
-        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        from: getFromAddress(),
         to,
         subject,
         text,
@@ -205,7 +218,7 @@ async function sendOrderPlacementEmails(order) {
     if (smtpTransporter) {
       console.log('[Order Placement Farmer] Sending to', farmerEmail);
       void smtpTransporter.sendMail({
-        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        from: getFromAddress(),
         to: farmerEmail,
         subject: `New order placed: ${order.productName || order.id}`,
         text: farmerText,
@@ -243,7 +256,7 @@ async function sendOrderPlacementEmails(order) {
     if (smtpTransporter) {
       console.log('[Order Placement Buyer] Sending to', buyerEmail);
       void smtpTransporter.sendMail({
-        from: process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+        from: getFromAddress(),
         to: buyerEmail,
         subject: `Order confirmed: ${order.productName || order.id}`,
         text: buyerText,
@@ -337,9 +350,7 @@ if (users.length === 0) {
 const app = express();
 const allowedOrigins = [
   process.env.CORS_ORIGIN,
-  process.env.FRONTEND_BASE,
-  'http://localhost:8080',
-  'http://localhost:3000',
+  process.env.FRONTEND_URL,
 ].filter(Boolean);
 
 console.log('[CORS] Configured allowed origins:', allowedOrigins);
@@ -410,122 +421,85 @@ app.post('/api/users', (req, res) => {
   res.status(201).json(safe);
 });
 
-// Send OTP to an email for verification (used during signup)
-app.post('/api/auth/send-otp', async (req, res) => {
+function cleanupExpiredOtps() {
+  const now = Date.now();
+  const before = otps.length;
+  otps = otps.filter((entry) => Number(entry.expiresAt) > now);
+  if (otps.length !== before) {
+    saveOtps(otps);
+    console.log(`[OTP] Cleaned up ${before - otps.length} expired OTP record(s)`);
+  }
+}
+
+async function sendOtpEmail(req, res, { resend = false } = {}) {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
   if (!email) {
     console.error('[OTP SEND] Email missing in request body');
     return res.status(400).json({ error: 'Email is required' });
   }
 
-  console.log(`[OTP SEND] ✓ Request received for email: ${email}`);
+  cleanupExpiredOtps();
+  console.log(`[OTP SEND] ${resend ? 'Resend' : 'Send'} request received for email: ${email}`);
 
-  // Create 6-digit OTP
   const otp = String(Math.floor(100000 + Math.random() * 900000));
   const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
-  const expiresAt = Date.now() + (5 * 60 * 1000); // 5 minutes
+  const expiresAt = Date.now() + (5 * 60 * 1000);
 
-  // Remove existing OTP for this email
-  otps = otps.filter((e) => e.email !== email);
+  otps = otps.filter((entry) => entry.email !== email);
   otps.push({ email, otpHash, expiresAt });
   saveOtps(otps);
   console.log(`[OTP SEND] ✓ OTP stored for ${email}, expires at: ${new Date(expiresAt).toISOString()}`);
 
-  try {
-    if (!smtpTransporter) {
-      console.warn(`[OTP SEND] ⚠ SMTP transporter not configured`);
-      const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-      console.log(`[OTP SEND] Console Fallback - OTP for ${email}: ${otp}`);
-      return res.json({ success: true, message: 'OTP generated (SMTP not configured - check console)', debugOtp });
-    }
+  const fromAddress = getFromAddress();
+  const subject = 'Your Farm Direct Verification Code';
+  const text = `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`;
+  const html = `<html><body><p>Your <strong>Farm Direct</strong> verification code is:</p><h2 style="color: #2ecc71; font-size: 32px; letter-spacing: 5px;">${otp}</h2><p>This code expires in <strong>5 minutes</strong>.</p><p>If you didn't request this code, please ignore this email.</p></body></html>`;
 
-    const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || 'no-reply@farm-direct.local';
-    console.log(`[OTP SEND] Attempting to send via SMTP from: ${fromAddress}`);
+  console.log('[OTP SEND] SMTP connection state:', smtpTransporter ? 'ready' : 'not configured');
+  console.log('[OTP SEND] From address:', fromAddress);
+  console.log('[OTP SEND] OTP generated:', { email, expiresAt: new Date(expiresAt).toISOString() });
 
-    try {
-      const info = await smtpTransporter.sendMail({
-        from: fromAddress,
-        to: email,
-        subject: 'Your Farm Direct Verification Code',
-        text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
-        html: `<html><body><p>Your <strong>Farm Direct</strong> verification code is:</p><h2 style="color: #2ecc71; font-size: 32px; letter-spacing: 5px;">${otp}</h2><p>This code expires in <strong>5 minutes</strong>.</p><p>If you didn't request this code, please ignore this email.</p></body></html>`,
-      });
-      console.log(`[OTP SEND] ✓ SMTP Email sent successfully to ${email}. Message ID: ${info.messageId}`);
-      return res.json({ success: true, message: 'OTP sent to your email' });
-    } catch (smtpErr) {
-      console.error('[OTP SEND] ✗ SMTP send failed:', smtpErr?.message || smtpErr);
-      console.error('[OTP SEND] Full error:', smtpErr);
-
-      // Try Brevo HTTP API fallback if API key is available
-      const brevoKey = process.env.BREVO_API_KEY;
-      if (!brevoKey) {
-        console.error('[OTP SEND] ✗ No BREVO_API_KEY available, cannot use fallback');
-        const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-        console.log(`[OTP SEND] Console Fallback - OTP for ${email}: ${otp}`);
-        return res.status(500).json({
-          error: 'Failed to send OTP (SMTP failed, no API key)',
-          debugOtp,
-          timestamp: new Date().toISOString(),
-        });
-      }
-
-      console.log('[OTP SEND] → Attempting Brevo HTTP API fallback...');
-
-      try {
-        const body = {
-          sender: { name: 'Farm Direct', email: fromAddress },
-          to: [{ email }],
-          subject: 'Your Farm Direct Verification Code',
-          textContent: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
-          htmlContent: `<html><body><p>Your <strong>Farm Direct</strong> verification code is:</p><h2 style="color: #2ecc71; font-size: 32px; letter-spacing: 5px;">${otp}</h2><p>This code expires in <strong>5 minutes</strong>.</p><p>If you didn't request this code, please ignore this email.</p></body></html>`,
-        };
-
-        console.log(`[OTP SEND] Brevo API Request Body:`, { to: body.to, sender: body.sender, subject: body.subject });
-
-        const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
-          method: 'POST',
-          headers: { 'api-key': brevoKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          timeout: 10000,
-        });
-
-        if (!resp.ok) {
-          const text = await resp.text().catch(() => 'no response body');
-          console.error(`[OTP SEND] ✗ Brevo HTTP API failed with status ${resp.status}`);
-          console.error(`[OTP SEND] Response:`, text);
-          const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-          return res.status(500).json({
-            error: `Failed to send OTP (Brevo API error ${resp.status})`,
-            debugOtp,
-            brevoStatus: resp.status,
-            timestamp: new Date().toISOString(),
-          });
-        }
-
-        const data = await resp.json().catch(() => ({}));
-        console.log(`[OTP SEND] ✓ Brevo HTTP API sent successfully`, data);
-        return res.json({ success: true, message: 'OTP sent via Brevo API' });
-      } catch (apiErr) {
-        console.error('[OTP SEND] ✗ Brevo API HTTP request failed:', apiErr?.message || apiErr);
-        const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-        console.log(`[OTP SEND] Console Fallback - OTP for ${email}: ${otp}`);
-        return res.status(500).json({
-          error: 'Failed to send OTP (API request failed)',
-          debugOtp,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-  } catch (e) {
-    console.error('[OTP SEND] ✗ Unexpected error:', e?.message || e);
+  if (!smtpTransporter) {
     const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-    return res.status(500).json({
-      error: 'Failed to send OTP. Please try again.',
+    console.error('[OTP SEND] SMTP transporter not configured');
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[OTP SEND] Development fallback OTP for ${email}: ${otp}`);
+      return res.json({ success: true, message: 'OTP generated (SMTP not configured)', debugOtp, resend });
+    }
+    return res.status(503).json({
+      error: 'Email service unavailable',
+      message: 'OTP could not be sent because SMTP is not configured',
       debugOtp,
       timestamp: new Date().toISOString(),
     });
   }
-});
+
+  try {
+    const info = await smtpTransporter.sendMail({
+      from: fromAddress,
+      to: email,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[OTP SEND] ✓ SMTP email sent successfully to ${email}. Message ID: ${info.messageId}`);
+    return res.json({ success: true, message: resend ? 'OTP resent to your email' : 'OTP sent to your email', resend });
+  } catch (smtpErr) {
+    console.error('[OTP SEND] ✗ SMTP send failed:', smtpErr?.message || smtpErr);
+    console.error('[OTP SEND] Full error:', smtpErr);
+    const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+    return res.status(502).json({
+      error: 'Failed to send OTP via SMTP',
+      message: 'Please try again later',
+      debugOtp,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
+// Send OTP to an email for verification (used during signup)
+app.post('/api/auth/send-otp', async (req, res) => sendOtpEmail(req, res, { resend: false }));
+app.post('/api/auth/resend-otp', async (req, res) => sendOtpEmail(req, res, { resend: true }));
 
 // Verify OTP
 app.post('/api/auth/verify-otp', (req, res) => {
@@ -1248,15 +1222,12 @@ app.get('/api/debug/otp-config', (req, res) => {
     smtp: {
       host: process.env.SMTP_HOST ? '✓ set' : '✗ missing',
       port: process.env.SMTP_PORT ? '✓ ' + process.env.SMTP_PORT : '✗ missing',
-      secure: process.env.SMTP_SECURE ? '✓ ' + process.env.SMTP_SECURE : '✗ missing (default: false)',
-      user: process.env.SMTP_USER ? '✓ set' : '✗ missing',
-      pass: process.env.SMTP_PASS ? '✓ set (' + process.env.SMTP_PASS.substring(0, 10) + '...)' : '✗ missing',
-      emailFrom: process.env.EMAIL_FROM ? '✓ ' + process.env.EMAIL_FROM : '✗ missing',
-    },
-    brevo: {
-      apiKey: process.env.BREVO_API_KEY ? '✓ set (' + process.env.BREVO_API_KEY.substring(0, 10) + '...)' : '✗ missing',
+      login: process.env.SMTP_LOGIN ? '✓ set' : '✗ missing',
+      key: process.env.SMTP_KEY ? '✓ set (' + process.env.SMTP_KEY.substring(0, 10) + '...)' : '✗ missing',
+      fromEmail: process.env.FROM_EMAIL ? '✓ ' + process.env.FROM_EMAIL : '✗ missing',
     },
     transporter: smtpTransporter ? '✓ initialized' : '✗ not initialized',
+    frontendUrl: process.env.FRONTEND_URL || '✗ missing',
   });
 });
 

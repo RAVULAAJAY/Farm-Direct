@@ -1,16 +1,14 @@
 import { Product, ProductReview, User, Order, Message } from '@/lib/data';
 
-// Determine API base URL intelligently
-const isLocalHost = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-const defaultApiBase = isLocalHost ? 'http://localhost:4000/api' : 'https://farm-direct-api.onrender.com/api';
+// Default to the deployed backend unless an explicit Vite env override is provided.
+const defaultApiBase = 'https://farm-direct-api.onrender.com/api';
 const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? defaultApiBase;
 const API_BASE = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
 
 // Log API configuration (development only)
 if (import.meta.env.DEV) {
-  console.log('[API Config] Hostname:', window.location.hostname);
-  console.log('[API Config] Is Local:', isLocalHost);
   console.log('[API Config] VITE_API_BASE:', import.meta.env.VITE_API_BASE);
+  console.log('[API Config] VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
   console.log('[API Config] Final API_BASE:', API_BASE);
 }
 

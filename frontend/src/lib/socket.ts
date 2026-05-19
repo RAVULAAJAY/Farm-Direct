@@ -1,12 +1,13 @@
 import { io, Socket } from 'socket.io-client';
 
-// Determine server URL intelligently
-const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+// Default to the deployed backend unless an explicit Vite env override is provided.
+const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? 'https://farm-direct-api.onrender.com/api';
 const SERVER = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '');
 
 // Log socket configuration (development only)
 if (import.meta.env.DEV) {
   console.log('[Socket Config] VITE_API_BASE:', import.meta.env.VITE_API_BASE);
+  console.log('[Socket Config] VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
   console.log('[Socket Config] Server URL:', SERVER);
 }
 
