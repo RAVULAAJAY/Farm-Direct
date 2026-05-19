@@ -7,31 +7,31 @@ const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
-// Initialize SMTP transporter once (reuse for all emails)
-let smtpTransporter = null;
-let smtpFallbackTransporter = null;
+// Initialize SMTP transporters (mapped by port) and read envs (support legacy and new names)
+const smtpTransportersByPort = {};
 const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
-const SMTP_LOGIN = String(process.env.SMTP_LOGIN || '').trim();
-const SMTP_KEY = String(process.env.SMTP_KEY || '').trim();
-const FROM_EMAIL = String(process.env.FROM_EMAIL || '').trim();
+// Support both new and legacy env names
+const SMTP_USER = String(process.env.SMTP_USER || process.env.SMTP_LOGIN || '').trim();
+const SMTP_PASS = String(process.env.SMTP_PASS || process.env.SMTP_KEY || '').trim();
+const FROM_EMAIL = String(process.env.EMAIL_FROM || process.env.FROM_EMAIL || '').trim();
 const SMTP_CONNECTION_TIMEOUT = Number(process.env.SMTP_CONNECTION_TIMEOUT || 20000);
 const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT || 20000);
 
 function getFromAddress() {
-  return FROM_EMAIL || SMTP_LOGIN || 'no-reply@farm-direct.local';
+  return FROM_EMAIL || SMTP_USER || 'no-reply@farm-direct.local';
 }
 
 function getMailSenderCandidates() {
   const preferredFrom = getFromAddress();
-  const loginFrom = SMTP_LOGIN && SMTP_LOGIN !== preferredFrom ? SMTP_LOGIN : '';
+  const loginFrom = SMTP_USER && SMTP_USER !== preferredFrom ? SMTP_USER : '';
   const candidates = [];
 
   if (preferredFrom) {
     candidates.push({
       label: `preferred sender ${preferredFrom}`,
       from: preferredFrom,
-      replyTo: SMTP_LOGIN || preferredFrom,
+      replyTo: SMTP_USER || preferredFrom,
     });
   }
 
@@ -50,41 +50,61 @@ function createSmtpTransport(port, secureOverride) {
   const nodemailer = require('nodemailer');
   const secure = typeof secureOverride === 'boolean' ? secureOverride : port === 465;
 
-  return nodemailer.createTransport({
+  const transporter = nodemailer.createTransport({
     host: SMTP_HOST,
     port,
     secure,
     auth: {
-      user: SMTP_LOGIN,
-      pass: SMTP_KEY,
+      user: SMTP_USER,
+      pass: SMTP_PASS,
     },
     authMethod: 'LOGIN',
+    requireTLS: true,
     connectionTimeout: SMTP_CONNECTION_TIMEOUT,
     greetingTimeout: SMTP_CONNECTION_TIMEOUT,
     socketTimeout: SMTP_SOCKET_TIMEOUT,
     family: 4,
     tls: {
       minVersion: 'TLSv1.2',
+      rejectUnauthorized: true,
     },
   });
+
+  // Verify right away so we log any connection issues early
+  void transporter.verify().then(() => {
+    console.log(`[SMTP] Verify OK for ${SMTP_HOST}:${port}`);
+  }).catch((err) => {
+    console.warn(`[SMTP] Verify failed for ${SMTP_HOST}:${port}:`, err && err.message ? err.message : err);
+  });
+
+  return transporter;
 }
 
 function getSmtpTransportCandidates() {
   const candidates = [];
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return candidates;
 
-  if (smtpTransporter) {
-    candidates.push({ label: `${SMTP_HOST}:${SMTP_PORT}`, transporter: smtpTransporter });
-  }
+  // Try the configured port first, then common alternates
+  const portsToTry = Array.from(new Set([Number(SMTP_PORT || 587), 587, 465, 2525].map(Number)));
 
-  const fallbackPort = SMTP_PORT === 465 ? 587 : 465;
-  if (SMTP_HOST && SMTP_LOGIN && SMTP_KEY && fallbackPort !== SMTP_PORT) {
-    if (!smtpFallbackTransporter) {
-      smtpFallbackTransporter = createSmtpTransport(fallbackPort, fallbackPort === 465);
+  for (const port of portsToTry) {
+    if (!port || Number.isNaN(port)) continue;
+    if (!smtpTransportersByPort[port]) {
+      smtpTransportersByPort[port] = createSmtpTransport(port, port === 465);
     }
-    candidates.push({ label: `${SMTP_HOST}:${fallbackPort}`, transporter: smtpFallbackTransporter });
+    candidates.push({ label: `${SMTP_HOST}:${port}`, transporter: smtpTransportersByPort[port] });
   }
 
   return candidates;
+}
+
+function smtpAvailable() {
+  try {
+    const candidates = getSmtpTransportCandidates();
+    return Array.isArray(candidates) && candidates.length > 0;
+  } catch (e) {
+    return false;
+  }
 }
 
 async function sendMailWithFallbacks(mailOptions, tag) {
@@ -123,21 +143,16 @@ async function sendMailWithFallbacks(mailOptions, tag) {
   throw new Error('SMTP send failed for all configured transports');
 }
 
-if (SMTP_HOST && SMTP_LOGIN && SMTP_KEY) {
+if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
   try {
-    smtpTransporter = createSmtpTransport(SMTP_PORT);
-
-    console.log(`[SMTP] Configured for host ${SMTP_HOST}:${SMTP_PORT} using login ${SMTP_LOGIN}`);
-    void smtpTransporter
-      .verify()
-      .then(() => console.log('[SMTP] Transport verification successful'))
-      .catch((error) => console.warn('[SMTP] Transport verification failed:', error?.message || error));
+    // Pre-create transports for primary and fallback ports so verify runs at startup
+    getSmtpTransportCandidates();
+    console.log(`[SMTP] Configured for host ${SMTP_HOST}:${SMTP_PORT} using login ${SMTP_USER}`);
   } catch (e) {
     console.warn('[SMTP] Initialization failed, emails will be logged to console', e && e.message ? e.message : e);
-    smtpTransporter = null;
   }
 } else {
-  console.warn('[SMTP] Missing SMTP_HOST, SMTP_LOGIN, or SMTP_KEY - outgoing emails will be logged to the server console');
+  console.warn('[SMTP] Missing SMTP_HOST, SMTP_USER, or SMTP_PASS - outgoing emails will be logged to the server console');
 }
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -202,7 +217,7 @@ async function sendPasswordResetEmail({ email, resetLink }) {
     console.log(`[Password Reset] SMTP not configured, reset link: ${resetLink}`);
     return false;
   }
-  if (smtpTransporter) {
+  if (smtpAvailable()) {
     try {
       console.log(`[Password Reset] Sending email to ${email} via configured SMTP...`);
       const result = await sendMailWithFallbacks({
@@ -228,7 +243,7 @@ async function sendPasswordResetEmail({ email, resetLink }) {
 async function sendTransactionalEmail({ to, subject, text, html, tag }) {
   if (!to) return false;
 
-  if (smtpTransporter) {
+  if (smtpAvailable()) {
     try {
       await sendMailWithFallbacks({
         from: getFromAddress(),
@@ -308,7 +323,7 @@ async function sendOrderPlacementEmails(order) {
       'Please review and process this order in your dashboard.',
     ].join('\n');
 
-    if (smtpTransporter) {
+    if (smtpAvailable()) {
       console.log('[Order Placement Farmer] Sending to', farmerEmail);
       void sendMailWithFallbacks({
         to: farmerEmail,
@@ -345,7 +360,7 @@ async function sendOrderPlacementEmails(order) {
       'Thank you for shopping with Farm Direct.',
     ].join('\n');
 
-    if (smtpTransporter) {
+    if (smtpAvailable()) {
       console.log('[Order Placement Buyer] Sending to', buyerEmail);
       void sendMailWithFallbacks({
         to: buyerEmail,
@@ -546,11 +561,11 @@ async function sendOtpEmail(req, res, { resend = false } = {}) {
   const text = `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`;
   const html = `<html><body><p>Your <strong>Farm Direct</strong> verification code is:</p><h2 style="color: #2ecc71; font-size: 32px; letter-spacing: 5px;">${otp}</h2><p>This code expires in <strong>5 minutes</strong>.</p><p>If you didn't request this code, please ignore this email.</p></body></html>`;
 
-  console.log('[OTP SEND] SMTP connection state:', smtpTransporter ? 'ready' : 'not configured');
+  console.log('[OTP SEND] SMTP connection state:', smtpAvailable() ? 'ready' : 'not configured');
   console.log('[OTP SEND] From address:', fromAddress);
   console.log('[OTP SEND] OTP generated:', { email, expiresAt: new Date(expiresAt).toISOString() });
 
-  if (!smtpTransporter) {
+  if (!smtpAvailable()) {
     const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
     console.error('[OTP SEND] SMTP transporter not configured');
     if (process.env.NODE_ENV !== 'production') {
@@ -1312,11 +1327,11 @@ app.get('/api/debug/otp-config', (req, res) => {
     smtp: {
       host: process.env.SMTP_HOST ? '✓ set' : '✗ missing',
       port: process.env.SMTP_PORT ? '✓ ' + process.env.SMTP_PORT : '✗ missing',
-      login: process.env.SMTP_LOGIN ? '✓ set' : '✗ missing',
-      key: process.env.SMTP_KEY ? '✓ set (' + process.env.SMTP_KEY.substring(0, 10) + '...)' : '✗ missing',
-      fromEmail: process.env.FROM_EMAIL ? '✓ ' + process.env.FROM_EMAIL : '✗ missing',
+      user: process.env.SMTP_USER || process.env.SMTP_LOGIN ? '✓ set' : '✗ missing',
+      pass: process.env.SMTP_PASS || process.env.SMTP_KEY ? (process.env.SMTP_PASS ? '✓ set (' + (process.env.SMTP_PASS || '').substring(0, 10) + '...)' : '✓ set') : '✗ missing',
+      fromEmail: process.env.EMAIL_FROM || process.env.FROM_EMAIL ? '✓ ' + (process.env.EMAIL_FROM || process.env.FROM_EMAIL) : '✗ missing',
     },
-    transporter: smtpTransporter ? '✓ initialized' : '✗ not initialized',
+    transporter: smtpAvailable() ? `✓ ${Object.keys(smtpTransportersByPort).length} transport(s)` : '✗ not initialized',
     frontendUrl: process.env.FRONTEND_URL || '✗ missing',
   });
 });

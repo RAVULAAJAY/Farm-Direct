@@ -6,13 +6,13 @@ require('dotenv').config({ path: path.resolve(process.cwd(), 'farm-direct-api.en
 
 const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
 const port = parseInt(process.env.SMTP_PORT || '587');
-const user = process.env.SMTP_LOGIN;
-const pass = process.env.SMTP_KEY;
-const from = process.env.FROM_EMAIL || user;
+const user = process.env.SMTP_USER || process.env.SMTP_LOGIN;
+const pass = process.env.SMTP_PASS || process.env.SMTP_KEY;
+const from = process.env.EMAIL_FROM || process.env.FROM_EMAIL || user;
 const to = process.env.EMAIL_TO || from;
 
 if (!user || !pass) {
-  console.error('Missing SMTP_LOGIN or SMTP_KEY. Export them or add to farm-direct-api.env');
+  console.error('Missing SMTP_USER or SMTP_PASS. Export them or add to farm-direct-api.env');
   process.exit(2);
 }
 
