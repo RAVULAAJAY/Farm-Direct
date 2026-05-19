@@ -22,6 +22,30 @@ function getFromAddress() {
   return FROM_EMAIL || SMTP_LOGIN || 'no-reply@farm-direct.local';
 }
 
+function getMailSenderCandidates() {
+  const preferredFrom = getFromAddress();
+  const loginFrom = SMTP_LOGIN && SMTP_LOGIN !== preferredFrom ? SMTP_LOGIN : '';
+  const candidates = [];
+
+  if (preferredFrom) {
+    candidates.push({
+      label: `preferred sender ${preferredFrom}`,
+      from: preferredFrom,
+      replyTo: SMTP_LOGIN || preferredFrom,
+    });
+  }
+
+  if (loginFrom) {
+    candidates.push({
+      label: `smtp login sender ${loginFrom}`,
+      from: loginFrom,
+      replyTo: preferredFrom,
+    });
+  }
+
+  return candidates;
+}
+
 function createSmtpTransport(port, secureOverride) {
   const nodemailer = require('nodemailer');
   const secure = typeof secureOverride === 'boolean' ? secureOverride : port === 465;
@@ -65,18 +89,33 @@ function getSmtpTransportCandidates() {
 
 async function sendMailWithFallbacks(mailOptions, tag) {
   const candidates = getSmtpTransportCandidates();
+  const senderCandidates = getMailSenderCandidates();
 
   for (const candidate of candidates) {
-    try {
-      console.log(`[${tag}] Attempting SMTP send via ${candidate.label}`);
-      const info = await candidate.transporter.sendMail(mailOptions);
-      console.log(`[${tag}] ✓ SMTP email sent successfully via ${candidate.label}. Message ID: ${info.messageId}`);
-      return { ok: true, info, transport: candidate.label };
-    } catch (error) {
-      const message = error?.message || String(error);
-      console.warn(`[${tag}] SMTP send failed via ${candidate.label}: ${message}`);
-      if (candidate === candidates[candidates.length - 1]) {
-        throw error;
+    for (const senderCandidate of senderCandidates) {
+      try {
+        const mergedMailOptions = {
+          ...mailOptions,
+          from: senderCandidate.from,
+          replyTo: senderCandidate.replyTo,
+        };
+        console.log(`[${tag}] Attempting SMTP send via ${candidate.label} using ${senderCandidate.label}`);
+        const info = await candidate.transporter.sendMail(mergedMailOptions);
+        console.log(`[${tag}] ✓ SMTP email sent successfully via ${candidate.label} using ${senderCandidate.label}. Message ID: ${info.messageId}`);
+        return { ok: true, info, transport: candidate.label, sender: senderCandidate.from };
+      } catch (error) {
+        const message = error?.message || String(error);
+        const errorSummary = {
+          code: error?.code,
+          command: error?.command,
+          responseCode: error?.responseCode,
+          response: error?.response,
+          message,
+        };
+        console.warn(`[${tag}] SMTP send failed via ${candidate.label} using ${senderCandidate.label}:`, errorSummary);
+        if (candidate === candidates[candidates.length - 1] && senderCandidate === senderCandidates[senderCandidates.length - 1]) {
+          throw error;
+        }
       }
     }
   }
@@ -271,13 +310,12 @@ async function sendOrderPlacementEmails(order) {
 
     if (smtpTransporter) {
       console.log('[Order Placement Farmer] Sending to', farmerEmail);
-      void smtpTransporter.sendMail({
-        from: getFromAddress(),
+      void sendMailWithFallbacks({
         to: farmerEmail,
         subject: `New order placed: ${order.productName || order.id}`,
         text: farmerText,
         html: `<p>Hello ${farmerName},</p><p>A new order has been placed successfully by a buyer.</p><p><strong>Buyer details</strong><br/>Name: ${buyerName}<br/>Email: ${buyerEmail || 'N/A'}<br/>Phone: ${buyerPhone || 'N/A'}<br/>Location: ${buyerLocation || 'N/A'}</p><p><strong>Complete order details</strong><br/><pre>${details}</pre></p><p>Please review and process this order in your dashboard.</p>`,
-      }).catch(e => {
+      }, 'Order Placement Farmer').catch(e => {
         console.warn('[Order Placement Farmer] SMTP send failed, falling back to log', e && e.message ? e.message : e);
         console.log('[Order Placement Farmer] Email to', farmerEmail);
         console.log('[Order Placement Farmer] Subject:', `New order placed: ${order.productName || order.id}`);
@@ -309,13 +347,12 @@ async function sendOrderPlacementEmails(order) {
 
     if (smtpTransporter) {
       console.log('[Order Placement Buyer] Sending to', buyerEmail);
-      void smtpTransporter.sendMail({
-        from: getFromAddress(),
+      void sendMailWithFallbacks({
         to: buyerEmail,
         subject: `Order confirmed: ${order.productName || order.id}`,
         text: buyerText,
         html: `<p>Hello ${buyerName},</p><p>Your order has been placed successfully.</p><p><strong>Order name:</strong> ${order.productName || 'N/A'}</p><p><strong>Order details</strong><br/><pre>${details}</pre></p><p>Thank you for shopping with Farm Direct.</p>`,
-      }).catch(e => {
+      }, 'Order Placement Buyer').catch(e => {
         console.warn('[Order Placement Buyer] SMTP send failed, falling back to log', e && e.message ? e.message : e);
         console.log('[Order Placement Buyer] Email to', buyerEmail);
         console.log('[Order Placement Buyer] Subject:', `Order confirmed: ${order.productName || order.id}`);
