@@ -595,6 +595,38 @@ async function sendOtpEmail(req, res, { resend = false } = {}) {
     console.error('[OTP SEND] ✗ SMTP send failed:', smtpErr?.message || smtpErr);
     console.error('[OTP SEND] Full error:', smtpErr);
     const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+
+    // Detect common SMTP failure modes and return helpful messages
+    const respCode = smtpErr?.responseCode || smtpErr?.code;
+    const respText = String(smtpErr?.response || smtpErr?.message || '').toLowerCase();
+    const unauthorizedIp = respCode === 525 || /unauthorized ip/i.test(respText) || /unauthorized ip address/i.test(respText);
+    const authError = smtpErr?.code === 'EAUTH' || /auth/i.test(String(smtpErr?.command || ''));
+    const timedOut = smtpErr?.code === 'ETIMEDOUT' || /timeout/i.test(String(smtpErr?.message || ''));
+
+    if (unauthorizedIp || (authError && /unauthorized ip/i.test(respText))) {
+      const hint = 'SMTP provider rejected connection: unauthorized IP address. Allowlist your Render service outbound IP(s) in Brevo (smtp-relay) or contact Brevo support.';
+      console.error('[OTP SEND] ✗ SMTP unauthorized IP. Hint:', hint);
+      return res.status(502).json({
+        error: 'Failed to send OTP via SMTP',
+        message: 'SMTP provider rejected connection: unauthorized IP address',
+        hint,
+        debugOtp,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (timedOut) {
+      const hint = 'Connection timed out. Try using port 587 (STARTTLS) or 2525 and ensure Render allows outbound SMTP traffic on that port.';
+      console.error('[OTP SEND] ✗ SMTP connection timed out. Hint:', hint);
+      return res.status(502).json({
+        error: 'Failed to send OTP via SMTP',
+        message: 'SMTP connection timed out',
+        hint,
+        debugOtp,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     return res.status(502).json({
       error: 'Failed to send OTP via SMTP',
       message: 'Please try again later',

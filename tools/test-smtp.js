@@ -29,7 +29,24 @@ if (!user || !pass) {
     console.log('Message sent:', info.messageId || info.response);
     process.exit(0);
   } catch (err) {
-    console.error('SMTP check failed:', err && err.message ? err.message : err);
+    const msg = err && err.message ? err.message : String(err);
+    console.error('SMTP check failed:', msg);
+
+    // Detect common Brevo / relay issues
+    const resp = String(err && err.response ? err.response : '');
+    if (/unauthorized ip/i.test(msg) || /unauthorized ip/i.test(resp) || /525 5.7.1/i.test(msg)) {
+      console.error('\nDetected: Unauthorized IP address.');
+      console.error('Action: Brevo is rejecting the connection from this server IP.');
+      console.error('  - If you are using smtp-relay.brevo.com, allowlist your server outbound IP(s) in the Brevo/SIB dashboard.');
+      console.error('  - Alternatively, use an SMTP host that accepts authenticated connections from Render, or use Brevo API.');
+    } else if (/timeout/i.test(msg) || err && err.code === 'ETIMEDOUT') {
+      console.error('\nDetected: Connection timeout.');
+      console.error('Action: Try using port 587 (STARTTLS) or 2525. Ensure your hosting provider allows outbound SMTP on that port.');
+    } else if (err && err.code === 'EAUTH') {
+      console.error('\nDetected: Authentication failure (EAUTH).');
+      console.error('Action: Double-check SMTP_LOGIN/SMTP_USER and SMTP_KEY/SMTP_PASS values for typos.');
+    }
+
     process.exit(1);
   }
 })();
