@@ -7,6 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const brevoSendOtp = require('./sendOtpEmail');
+const emailService = require('./services/emailService');
 
 // SMTP/SMTP-relay removed. Use Brevo transactional API when `BREVO_API_KEY` is set.
 function getFromAddress() {
@@ -117,32 +118,49 @@ function getFrontendBase(req) {
 }
 
 async function sendPasswordResetEmail({ email, resetLink }) {
-  const smtpHost = process.env.SMTP_HOST;
-  if (!smtpHost) {
-    console.log(`[Password Reset] SMTP not configured, reset link: ${resetLink}`);
+  if (!email) return false;
+  try {
+    // Prefer Brevo transactional API via emailService
+    if (process.env.BREVO_API_KEY) {
+      try {
+        console.log(`[Password Reset] Sending reset email via Brevo to ${email}`);
+        const ok = await emailService.sendPasswordResetEmail(email, resetLink);
+        if (ok) {
+          console.log(`[Password Reset] Email sent successfully to ${email}`);
+          return true;
+        }
+        console.warn('[Password Reset] Brevo send returned false, falling back to other methods');
+      } catch (e) {
+        console.warn('[Password Reset] Brevo send failed:', e && e.message ? e.message : e);
+      }
+    }
+
+    // Fallback to existing transactional helper (which will also use Brevo if available)
+    if (smtpAvailable()) {
+      try {
+        console.log(`[Password Reset] Sending email to ${email} via configured transactional helper...`);
+        const result = await sendMailWithFallbacks({
+          from: getFromAddress(),
+          to: email,
+          subject: 'Password reset request',
+          text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
+          html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
+        }, 'Password Reset');
+        console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${result.info && result.info.messageId ? result.info.messageId : 'n/a'}`);
+        return true;
+      } catch (e) {
+        console.warn(`[Password Reset] transactional send failed: ${e?.message || e}. Falling back to console log.`);
+        console.log(`[Password Reset] Reset link for ${email}: ${resetLink}`);
+        return false;
+      }
+    }
+
+    console.log(`[Password Reset] Email service not configured. Reset link for ${email}: ${resetLink}`);
+    return false;
+  } catch (e) {
+    console.warn('[Password Reset] Unexpected error sending reset email:', e && e.message ? e.message : e);
     return false;
   }
-  if (smtpAvailable()) {
-    try {
-      console.log(`[Password Reset] Sending email to ${email} via configured SMTP...`);
-      const result = await sendMailWithFallbacks({
-        from: getFromAddress(),
-        to: email,
-        subject: 'Password reset request',
-        text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
-        html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
-      }, 'Password Reset');
-      console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${result.info.messageId}`);
-      return true;
-    } catch (e) {
-      console.warn(`[Password Reset] SMTP error: ${e?.message || e}. Falling back to console log.`);
-      console.log(`[Password Reset] Reset link for ${email}: ${resetLink}`);
-      return false;
-    }
-  }
-
-  console.log(`[Password Reset] SMTP not configured properly. Reset link for ${email}: ${resetLink}`);
-  return false;
 }
 
 async function sendTransactionalEmail({ to, subject, text, html, tag }) {
@@ -210,83 +228,21 @@ async function sendOrderPlacementEmails(order) {
   const { buyerEmail, farmerEmail, buyerName, farmerName, buyerPhone, buyerLocation } = getOrderPartyDetails(order);
   const details = buildOrderDetailsText(order);
 
-  if (farmerEmail) {
-    const farmerText = [
-      `Hello ${farmerName},`,
-      '',
-      'A new order has been placed successfully by a buyer.',
-      '',
-      'Buyer details:',
-      `Name: ${buyerName}`,
-      `Email: ${buyerEmail || 'N/A'}`,
-      `Phone: ${buyerPhone || 'N/A'}`,
-      `Location: ${buyerLocation || 'N/A'}`,
-      '',
-      'Complete order details:',
-      details,
-      '',
-      'Please review and process this order in your dashboard.',
-    ].join('\n');
-
-    if (smtpAvailable()) {
-      console.log('[Order Placement Farmer] Sending to', farmerEmail);
-      void sendMailWithFallbacks({
-        to: farmerEmail,
-        subject: `New order placed: ${order.productName || order.id}`,
-        text: farmerText,
-        html: `<p>Hello ${farmerName},</p><p>A new order has been placed successfully by a buyer.</p><p><strong>Buyer details</strong><br/>Name: ${buyerName}<br/>Email: ${buyerEmail || 'N/A'}<br/>Phone: ${buyerPhone || 'N/A'}<br/>Location: ${buyerLocation || 'N/A'}</p><p><strong>Complete order details</strong><br/><pre>${details}</pre></p><p>Please review and process this order in your dashboard.</p>`,
-      }, 'Order Placement Farmer').catch(e => {
-        console.warn('[Order Placement Farmer] SMTP send failed, falling back to log', e && e.message ? e.message : e);
-        console.log('[Order Placement Farmer] Email to', farmerEmail);
-        console.log('[Order Placement Farmer] Subject:', `New order placed: ${order.productName || order.id}`);
-        console.log('[Order Placement Farmer] Body:', farmerText);
-      });
-    } else {
-      void sendTransactionalEmail({
-        to: farmerEmail,
-        subject: `New order placed: ${order.productName || order.id}`,
-        text: farmerText,
-        html: `<p>Hello ${farmerName},</p><p>A new order has been placed successfully by a buyer.</p><p><strong>Buyer details</strong><br/>Name: ${buyerName}<br/>Email: ${buyerEmail || 'N/A'}<br/>Phone: ${buyerPhone || 'N/A'}<br/>Location: ${buyerLocation || 'N/A'}</p><p><strong>Complete order details</strong><br/><pre>${details}</pre></p><p>Please review and process this order in your dashboard.</p>`,
-        tag: 'Order Placement Farmer',
-      });
+  try {
+    const { buyerEmail, farmerEmail } = getOrderPartyDetails(order);
+    if (farmerEmail) {
+      void emailService.sendOrderPlacedToFarmer(order)
+        .then(() => console.log('[Order Placement Farmer] Email sent to', farmerEmail))
+        .catch((e) => console.warn('[Order Placement Farmer] Email failed:', e && e.message ? e.message : e));
     }
-  }
 
-  if (buyerEmail) {
-    const buyerText = [
-      `Hello ${buyerName},`,
-      '',
-      'Your order has been placed successfully.',
-      `Order name: ${order.productName || 'N/A'}`,
-      '',
-      'Order details:',
-      details,
-      '',
-      'Thank you for shopping with Farm Direct.',
-    ].join('\n');
-
-    if (smtpAvailable()) {
-      console.log('[Order Placement Buyer] Sending to', buyerEmail);
-      void sendMailWithFallbacks({
-        to: buyerEmail,
-        subject: `Order confirmed: ${order.productName || order.id}`,
-        text: buyerText,
-        html: `<p>Hello ${buyerName},</p><p>Your order has been placed successfully.</p><p><strong>Order name:</strong> ${order.productName || 'N/A'}</p><p><strong>Order details</strong><br/><pre>${details}</pre></p><p>Thank you for shopping with Farm Direct.</p>`,
-      }, 'Order Placement Buyer').catch(e => {
-        console.warn('[Order Placement Buyer] SMTP send failed, falling back to log', e && e.message ? e.message : e);
-        console.log('[Order Placement Buyer] Email to', buyerEmail);
-        console.log('[Order Placement Buyer] Subject:', `Order confirmed: ${order.productName || order.id}`);
-        console.log('[Order Placement Buyer] Body:', buyerText);
-      });
-    } else {
-      void sendTransactionalEmail({
-        to: buyerEmail,
-        subject: `Order confirmed: ${order.productName || order.id}`,
-        text: buyerText,
-        html: `<p>Hello ${buyerName},</p><p>Your order has been placed successfully.</p><p><strong>Order name:</strong> ${order.productName || 'N/A'}</p><p><strong>Order details</strong><br/><pre>${details}</pre></p><p>Thank you for shopping with Farm Direct.</p>`,
-        tag: 'Order Placement Buyer',
-      });
+    if (buyerEmail) {
+      void emailService.sendOrderPlacedToBuyer(order)
+        .then(() => console.log('[Order Placement Buyer] Email sent to', buyerEmail))
+        .catch((e) => console.warn('[Order Placement Buyer] Email failed:', e && e.message ? e.message : e));
     }
+  } catch (e) {
+    console.warn('[Order Emails] Unexpected error processing order emails:', e && e.message ? e.message : e);
   }
 }
 
@@ -318,29 +274,15 @@ function getOrderStatusEmailMessage(order) {
 }
 
 async function sendOrderStatusEmailToBuyer(order) {
-  const { buyerEmail, buyerName } = getOrderPartyDetails(order);
-  if (!buyerEmail) return;
-
-  const { subject, message } = getOrderStatusEmailMessage(order);
-  const details = buildOrderDetailsText(order);
-  const text = [
-    `Hello ${buyerName},`,
-    '',
-    message,
-    '',
-    `Order name: ${order.productName || 'N/A'}`,
-    '',
-    'Latest order details:',
-    details,
-  ].join('\n');
-
-  await sendTransactionalEmail({
-    to: buyerEmail,
-    subject,
-    text,
-    html: `<p>Hello ${buyerName},</p><p>${message}</p><p><strong>Order name:</strong> ${order.productName || 'N/A'}</p><p><strong>Latest order details</strong><br/><pre>${details}</pre></p>`,
-    tag: 'Order Status Buyer',
-  });
+  try {
+    const { buyerEmail } = getOrderPartyDetails(order);
+    if (!buyerEmail) return;
+    void emailService.sendOrderStatusUpdateToBuyer(order)
+      .then(() => console.log('[Order Status] Email sent to buyer:', buyerEmail))
+      .catch((e) => console.warn('[Order Status] Email failed for buyer:', buyerEmail, e && e.message ? e.message : e));
+  } catch (e) {
+    console.warn('[Order Status] Unexpected error sending status email:', e && e.message ? e.message : e);
+  }
 }
 
 
@@ -430,6 +372,14 @@ app.post('/api/users', (req, res) => {
   delete safe.passwordHash;
   delete safe.passwordSalt;
   res.status(201).json(safe);
+  // Fire-and-forget: send account created email via centralized emailService
+  try {
+    void emailService.sendAccountCreatedEmail(user)
+      .then(() => console.log('[Account Created] Email sent to', user.email))
+      .catch(err => console.warn('[Account Created] Email failed for', user.email, err && err.message ? err.message : err));
+  } catch (e) {
+    console.warn('[Account Created] Unexpected error triggering account email:', e && e.message ? e.message : e);
+  }
 });
 
 function cleanupExpiredOtps() {
