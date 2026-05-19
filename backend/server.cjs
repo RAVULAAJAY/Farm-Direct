@@ -11,7 +11,7 @@ const emailService = require('./services/emailService');
 
 // All transactional emails use Brevo via `emailService`.
 function getFromAddress() {
-  return String(process.env.EMAIL_FROM || process.env.FROM_EMAIL || 'no-reply@farm-direct.local').trim();
+  return String(process.env.EMAIL_FROM || 'no-reply@farm-direct.local').trim();
 }
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -76,7 +76,7 @@ async function sendPasswordResetEmail({ email, resetLink }) {
     if (process.env.BREVO_API_KEY) {
       try {
         console.log(`[Password Reset] Sending reset email via Brevo to ${email}`);
-        const ok = await emailService.sendPasswordResetEmail(email, resetLink);
+        const ok = await emailService.sendForgotPasswordEmail(email, resetLink);
         if (ok) {
           console.log(`[Password Reset] Email sent successfully to ${email}`);
           return true;
@@ -139,17 +139,20 @@ async function sendOrderPlacementEmails(order) {
   const details = buildOrderDetailsText(order);
 
   try {
-    const { buyerEmail, farmerEmail } = getOrderPartyDetails(order);
-    if (farmerEmail) {
-      void emailService.sendOrderPlacedToFarmer(order)
-        .then(() => console.log('[Order Placement Farmer] Email sent to', farmerEmail))
-        .catch((e) => console.warn('[Order Placement Farmer] Email failed:', e && e.message ? e.message : e));
+    const { buyerEmail: be, farmerEmail: fe } = getOrderPartyDetails(order);
+
+    if (fe) {
+      console.log('[Order Emails] Sending farmer email to', fe, 'for order', order.id);
+      void emailService.sendFarmerNewOrderEmail(order)
+        .then((resp) => console.log('[Order Placement Farmer] Email send result for', fe, ':', resp))
+        .catch((e) => console.error('[Order Placement Farmer] Email failed for', fe, e, e && (e.response?.body || e.body || e.response)));
     }
 
-    if (buyerEmail) {
-      void emailService.sendOrderPlacedToBuyer(order)
-        .then(() => console.log('[Order Placement Buyer] Email sent to', buyerEmail))
-        .catch((e) => console.warn('[Order Placement Buyer] Email failed:', e && e.message ? e.message : e));
+    if (be) {
+      console.log('[Order Emails] Sending buyer email to', be, 'for order', order.id);
+      void emailService.sendOrderPlacedEmail(order)
+        .then((resp) => console.log('[Order Placement Buyer] Email send result for', be, ':', resp))
+        .catch((e) => console.error('[Order Placement Buyer] Email failed for', be, e, e && (e.response?.body || e.body || e.response)));
     }
   } catch (e) {
     console.warn('[Order Emails] Unexpected error processing order emails:', e && e.message ? e.message : e);
@@ -187,7 +190,7 @@ async function sendOrderStatusEmailToBuyer(order) {
   try {
     const { buyerEmail } = getOrderPartyDetails(order);
     if (!buyerEmail) return;
-    void emailService.sendOrderStatusUpdateToBuyer(order)
+    void emailService.sendOrderStatusEmail(order)
       .then(() => console.log('[Order Status] Email sent to buyer:', buyerEmail))
       .catch((e) => console.warn('[Order Status] Email failed for buyer:', buyerEmail, e && e.message ? e.message : e));
   } catch (e) {
@@ -537,7 +540,19 @@ app.post('/api/orders', (req, res) => {
     console.error('[Orders] Error notifying farmer of new order:', e && e.message ? e.message : e);
   }
 
-  void sendOrderPlacementEmails(order);
+  // Log order created and key fields for debugging
+  try {
+    console.log('[Orders] Created order:', order.id, 'product:', order.productName, 'quantity:', order.quantity, 'totalPrice:', order.totalPrice);
+    console.log('[Orders] Buyer email:', order.buyerEmail, 'Farmer email:', order.farmerEmail);
+  } catch (e) {}
+
+  // Trigger order-related emails (fire-and-forget)
+  try {
+    console.log('[Orders] Triggering sendOrderPlacementEmails for', order.id);
+    void sendOrderPlacementEmails(order);
+  } catch (e) {
+    console.error('[Orders] Failed to trigger order emails for', order.id, e);
+  }
 
   res.status(201).json(order);
 });
@@ -757,7 +772,13 @@ app.put('/api/orders/:id', (req, res) => {
   const statusChanged = String(previous.status || '') !== String(updated.status || '');
   const deliveryStatusChanged = String(previous.deliveryStatus || '') !== String(updated.deliveryStatus || '');
   if (statusChanged || deliveryStatusChanged) {
-    void sendOrderStatusEmailToBuyer(updated);
+    try {
+      console.log('[Orders] Status changed for order', updated.id, 'previous:', { status: previous.status, deliveryStatus: previous.deliveryStatus }, 'updated:', { status: updated.status, deliveryStatus: updated.deliveryStatus });
+      console.log('[Orders] Triggering order status email for', updated.id);
+      void sendOrderStatusEmailToBuyer(updated);
+    } catch (e) {
+      console.error('[Orders] Failed to trigger status email for', updated.id, e);
+    }
   }
 
   // Log activity (best-effort)
@@ -1074,14 +1095,9 @@ const listenHost = process.env.HOST || '0.0.0.0';
 app.get('/api/debug/otp-config', (req, res) => {
   if (process.env.DEBUG_OTP !== 'true') return res.status(403).json({ error: 'Debug mode not enabled' });
   res.json({
-    smtp: {
-      host: process.env.SMTP_HOST ? '✓ set' : '✗ missing',
-      port: process.env.SMTP_PORT ? '✓ ' + process.env.SMTP_PORT : '✗ missing',
-      user: process.env.SMTP_USER || process.env.SMTP_LOGIN ? '✓ set' : '✗ missing',
-      pass: process.env.SMTP_PASS || process.env.SMTP_KEY ? (process.env.SMTP_PASS ? '✓ set (' + (process.env.SMTP_PASS || '').substring(0, 10) + '...)' : '✓ set') : '✗ missing',
-      fromEmail: process.env.EMAIL_FROM || process.env.FROM_EMAIL ? '✓ ' + (process.env.EMAIL_FROM || process.env.FROM_EMAIL) : '✗ missing',
-    },
-    transporter: process.env.BREVO_API_KEY ? '✓ Brevo configured' : '✗ Brevo not configured',
+    brevo: process.env.BREVO_API_KEY ? '✓ Brevo API key set' : '✗ BREVO_API_KEY missing',
+    from: process.env.EMAIL_FROM ? `✓ ${process.env.EMAIL_FROM}` : '✗ EMAIL_FROM missing',
+    fromName: process.env.FROM_NAME || 'not set (defaults to "Farm Direct")',
     frontendUrl: process.env.FRONTEND_URL || '✗ missing',
   });
 });
