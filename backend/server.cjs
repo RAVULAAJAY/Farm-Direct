@@ -9,30 +9,84 @@ const { v4: uuidv4 } = require('uuid');
 
 // Initialize SMTP transporter once (reuse for all emails)
 let smtpTransporter = null;
+let smtpFallbackTransporter = null;
 const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_LOGIN = String(process.env.SMTP_LOGIN || '').trim();
 const SMTP_KEY = String(process.env.SMTP_KEY || '').trim();
 const FROM_EMAIL = String(process.env.FROM_EMAIL || '').trim();
+const SMTP_CONNECTION_TIMEOUT = Number(process.env.SMTP_CONNECTION_TIMEOUT || 20000);
+const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT || 20000);
 
 function getFromAddress() {
   return FROM_EMAIL || SMTP_LOGIN || 'no-reply@farm-direct.local';
 }
 
+function createSmtpTransport(port, secureOverride) {
+  const nodemailer = require('nodemailer');
+  const secure = typeof secureOverride === 'boolean' ? secureOverride : port === 465;
+
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port,
+    secure,
+    auth: {
+      user: SMTP_LOGIN,
+      pass: SMTP_KEY,
+    },
+    authMethod: 'LOGIN',
+    connectionTimeout: SMTP_CONNECTION_TIMEOUT,
+    greetingTimeout: SMTP_CONNECTION_TIMEOUT,
+    socketTimeout: SMTP_SOCKET_TIMEOUT,
+    family: 4,
+    tls: {
+      minVersion: 'TLSv1.2',
+    },
+  });
+}
+
+function getSmtpTransportCandidates() {
+  const candidates = [];
+
+  if (smtpTransporter) {
+    candidates.push({ label: `${SMTP_HOST}:${SMTP_PORT}`, transporter: smtpTransporter });
+  }
+
+  const fallbackPort = SMTP_PORT === 465 ? 587 : 465;
+  if (SMTP_HOST && SMTP_LOGIN && SMTP_KEY && fallbackPort !== SMTP_PORT) {
+    if (!smtpFallbackTransporter) {
+      smtpFallbackTransporter = createSmtpTransport(fallbackPort, fallbackPort === 465);
+    }
+    candidates.push({ label: `${SMTP_HOST}:${fallbackPort}`, transporter: smtpFallbackTransporter });
+  }
+
+  return candidates;
+}
+
+async function sendMailWithFallbacks(mailOptions, tag) {
+  const candidates = getSmtpTransportCandidates();
+
+  for (const candidate of candidates) {
+    try {
+      console.log(`[${tag}] Attempting SMTP send via ${candidate.label}`);
+      const info = await candidate.transporter.sendMail(mailOptions);
+      console.log(`[${tag}] ✓ SMTP email sent successfully via ${candidate.label}. Message ID: ${info.messageId}`);
+      return { ok: true, info, transport: candidate.label };
+    } catch (error) {
+      const message = error?.message || String(error);
+      console.warn(`[${tag}] SMTP send failed via ${candidate.label}: ${message}`);
+      if (candidate === candidates[candidates.length - 1]) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error('SMTP send failed for all configured transports');
+}
+
 if (SMTP_HOST && SMTP_LOGIN && SMTP_KEY) {
   try {
-    const nodemailer = require('nodemailer');
-    smtpTransporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_PORT === 465,
-      auth: {
-        user: SMTP_LOGIN,
-        pass: SMTP_KEY,
-      },
-      connectionTimeout: 30000,
-      socketTimeout: 30000,
-    });
+    smtpTransporter = createSmtpTransport(SMTP_PORT);
 
     console.log(`[SMTP] Configured for host ${SMTP_HOST}:${SMTP_PORT} using login ${SMTP_LOGIN}`);
     void smtpTransporter
@@ -112,14 +166,14 @@ async function sendPasswordResetEmail({ email, resetLink }) {
   if (smtpTransporter) {
     try {
       console.log(`[Password Reset] Sending email to ${email} via configured SMTP...`);
-      const info = await smtpTransporter.sendMail({
+      const result = await sendMailWithFallbacks({
         from: getFromAddress(),
         to: email,
         subject: 'Password reset request',
         text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
         html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
-      });
-      console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${info.messageId}`);
+      }, 'Password Reset');
+      console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${result.info.messageId}`);
       return true;
     } catch (e) {
       console.warn(`[Password Reset] SMTP error: ${e?.message || e}. Falling back to console log.`);
@@ -137,13 +191,13 @@ async function sendTransactionalEmail({ to, subject, text, html, tag }) {
 
   if (smtpTransporter) {
     try {
-      await smtpTransporter.sendMail({
+      await sendMailWithFallbacks({
         from: getFromAddress(),
         to,
         subject,
         text,
         html,
-      });
+      }, tag);
       return true;
     } catch (e) {
       console.warn(`[${tag}] Failed to send SMTP email: ${e?.message || e}`);
@@ -475,14 +529,13 @@ async function sendOtpEmail(req, res, { resend = false } = {}) {
   }
 
   try {
-    const info = await smtpTransporter.sendMail({
+    const result = await sendMailWithFallbacks({
       from: fromAddress,
       to: email,
       subject,
       text,
       html,
-    });
-    console.log(`[OTP SEND] ✓ SMTP email sent successfully to ${email}. Message ID: ${info.messageId}`);
+    }, 'OTP SEND');
     return res.json({ success: true, message: resend ? 'OTP resent to your email' : 'OTP sent to your email', resend });
   } catch (smtpErr) {
     console.error('[OTP SEND] ✗ SMTP send failed:', smtpErr?.message || smtpErr);
