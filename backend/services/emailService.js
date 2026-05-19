@@ -48,15 +48,55 @@ if (typeof brevo.TransactionalEmailsApi === 'function') {
 
 async function sendTransactionalEmail({ to, subject, html, text, tag = 'Transactional' }) {
   if (!to) throw new Error('No recipient provided');
+  // Ensure there's always a meaningful plain-text fallback
+  const finalText = (typeof text === 'string' && text.trim().length > 0)
+    ? text
+    : (html ? htmlToText(html) : (subject || ''));
+
   try {
-    const payload = makePayload(to, subject, html, text);
+    const recipients = formatRecipients(to);
+    console.log(`[EmailService:${tag}] Sending to ${recipients} subject="${subject || ''}"`);
+    const payload = makePayload(to, subject, html, finalText);
     const resp = await sendTransacEmailFunc(payload);
-    console.log(`[EmailService:${tag}] Sent to ${Array.isArray(to) ? to.join(',') : to}`);
+    console.log(`[EmailService:${tag}] Sent to ${recipients} ✓`);
     return resp;
   } catch (err) {
-    console.error(`[EmailService:${tag}] Send failed:`, err && err.message ? err.message : err);
+    const recipients = formatRecipients(to);
+    console.error(`[EmailService:${tag}] Send failed to ${recipients}:`, err && err.message ? err.message : err);
     throw err;
   }
+}
+
+// Helper: convert basic HTML to a readable plain-text fallback
+function htmlToText(html) {
+  if (!html) return '';
+  let text = String(html);
+  // Replace common block tags with newlines
+  text = text.replace(/<\s*(?:br|br\/)\s*>/gi, '\n');
+  text = text.replace(/<\s*\/\s*p\s*>/gi, '\n');
+  text = text.replace(/<\s*\/\s*h[1-6]\s*>/gi, '\n');
+  text = text.replace(/<\s*\/\s*li\s*>/gi, '\n');
+  // Remove remaining tags
+  text = text.replace(/<[^>]*>/g, '');
+  // Decode a few HTML entities
+  text = text.replace(/&nbsp;/g, ' ');
+  text = text.replace(/&amp;/g, '&');
+  text = text.replace(/&lt;/g, '<');
+  text = text.replace(/&gt;/g, '>');
+  // Collapse multiple whitespace/newlines
+  text = text.replace(/\s+\n/g, '\n');
+  text = text.replace(/\n{2,}/g, '\n\n');
+  return text.trim();
+}
+
+function formatRecipients(to) {
+  if (!to) return '';
+  if (Array.isArray(to)) {
+    return to.map(t => (typeof t === 'string' ? t : (t && (t.email || t.name) ? (t.email || t.name) : JSON.stringify(t)))).join(', ');
+  }
+  if (typeof to === 'string') return to;
+  if (typeof to === 'object') return to.email || to.name || JSON.stringify(to);
+  return String(to);
 }
 
 async function sendAccountCreatedEmail(user) {
@@ -72,7 +112,8 @@ async function sendAccountCreatedEmail(user) {
     </body></html>
   `;
   try {
-    await sendTransactionalEmail({ to: user.email, subject, html, tag: 'Account Created' });
+    const text = `Hi ${user.name || 'User'},\n\nYour ${role === 'farmer' ? 'Farmer' : 'Buyer'} account has been created successfully. You can now sign in and start using Farm Direct.\n\nThank you for joining Farm Direct.`;
+    await sendTransactionalEmail({ to: user.email, subject, html, text, tag: 'Account Created' });
     return true;
   } catch (e) {
     console.warn('[EmailService] sendAccountCreatedEmail failed:', e && e.message ? e.message : e);
@@ -90,7 +131,8 @@ async function sendPasswordResetEmail(email, resetLink) {
     </body></html>
   `;
   try {
-    await sendTransactionalEmail({ to: email, subject, html, tag: 'Password Reset' });
+    const text = `You requested a password reset. Use the link below to reset your password (valid for 1 hour):\n${resetLink}\n\nIf you did not request this, please ignore this message.`;
+    await sendTransactionalEmail({ to: email, subject, html, text, tag: 'Password Reset' });
     return true;
   } catch (e) {
     console.warn('[EmailService] sendPasswordResetEmail failed:', e && e.message ? e.message : e);
@@ -118,7 +160,8 @@ async function sendOrderPlacedToBuyer(order) {
     </body></html>
   `;
   try {
-    await sendTransactionalEmail({ to, subject, html, tag: 'Order Placed Buyer' });
+    const text = `Order placed successfully\n\nHello ${order.buyerName || 'Buyer'},\nYour order has been placed successfully.\n\nProduct: ${order.productName || 'N/A'}\nQuantity: ${order.quantity ?? 'N/A'}\nTotal Price: ${order.totalPrice ?? 'N/A'}\nOrder ID: ${order.id}\n\nThank you for shopping with Farm Direct.`;
+    await sendTransactionalEmail({ to, subject, html, text, tag: 'Order Placed Buyer' });
     return true;
   } catch (e) {
     console.warn('[EmailService] sendOrderPlacedToBuyer failed:', e && e.message ? e.message : e);
@@ -146,7 +189,8 @@ async function sendOrderPlacedToFarmer(order) {
     </body></html>
   `;
   try {
-    await sendTransactionalEmail({ to, subject, html, tag: 'Order Placed Farmer' });
+    const text = `New order received\n\nHello ${order.farmerName || 'Farmer'},\nYou have received a new order from ${buyerName}.\n\nProduct: ${order.productName || 'N/A'}\nQuantity: ${order.quantity ?? 'N/A'}\nOrder ID: ${order.id}\n\nPlease review and process this order in your dashboard.`;
+    await sendTransactionalEmail({ to, subject, html, text, tag: 'Order Placed Farmer' });
     return true;
   } catch (e) {
     console.warn('[EmailService] sendOrderPlacedToFarmer failed:', e && e.message ? e.message : e);
@@ -184,7 +228,8 @@ async function sendOrderStatusUpdateToBuyer(order, status) {
     </body></html>
   `;
   try {
-    await sendTransactionalEmail({ to, subject, html, tag: 'Order Status Buyer' });
+    const text = `Hello ${order.buyerName || 'Buyer'},\n\n${message}\n\nOrder ID: ${order.id}\nProduct: ${order.productName || 'N/A'}`;
+    await sendTransactionalEmail({ to, subject, html, text, tag: 'Order Status Buyer' });
     return true;
   } catch (e) {
     console.warn('[EmailService] sendOrderStatusUpdateToBuyer failed:', e && e.message ? e.message : e);
