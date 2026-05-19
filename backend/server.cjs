@@ -9,56 +9,9 @@ const { v4: uuidv4 } = require('uuid');
 const brevoSendOtp = require('./sendOtpEmail');
 const emailService = require('./services/emailService');
 
-// SMTP/SMTP-relay removed. Use Brevo transactional API when `BREVO_API_KEY` is set.
+// All transactional emails use Brevo via `emailService`.
 function getFromAddress() {
-  return String(process.env.EMAIL_FROM || process.env.FROM_EMAIL || process.env.SMTP_USER || 'no-reply@farm-direct.local').trim();
-}
-
-function smtpAvailable() {
-  return Boolean(process.env.BREVO_API_KEY);
-}
-
-async function sendMailWithFallbacks(mailOptions, tag) {
-  if (!process.env.BREVO_API_KEY) {
-    throw new Error('Email delivery disabled: no BREVO_API_KEY configured');
-  }
-
-  try {
-    const brevo = require('@getbrevo/brevo');
-    const apiInstance = new brevo.TransactionalEmailsApi();
-    apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
-
-    const sendSmtpEmail = new brevo.SendSmtpEmail();
-    sendSmtpEmail.subject = mailOptions.subject || '';
-    sendSmtpEmail.htmlContent = mailOptions.html || mailOptions.htmlContent || (mailOptions.text ? `<pre>${mailOptions.text}</pre>` : '');
-    sendSmtpEmail.textContent = mailOptions.text || mailOptions.textContent || '';
-    sendSmtpEmail.sender = {
-      name: process.env.FROM_NAME || 'Farm Direct',
-      email: process.env.FROM_EMAIL || process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
-    };
-
-    const to = [];
-    if (Array.isArray(mailOptions.to)) {
-      for (const t of mailOptions.to) {
-        if (typeof t === 'string') to.push({ email: t });
-        else if (t && t.email) to.push({ email: t.email, name: t.name });
-      }
-    } else if (typeof mailOptions.to === 'string') {
-      to.push({ email: mailOptions.to });
-    } else if (mailOptions.to && mailOptions.to.email) {
-      to.push({ email: mailOptions.to.email, name: mailOptions.to.name });
-    }
-
-    if (to.length === 0) throw new Error('No recipient specified for transactional email');
-    sendSmtpEmail.to = to;
-
-    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
-    console.log(`[${tag}] Brevo send result:`, result);
-    return { ok: true, info: result };
-  } catch (err) {
-    console.warn(`[${tag}] Brevo send failed:`, err && err.message ? err.message : err);
-    throw err;
-  }
+  return String(process.env.EMAIL_FROM || process.env.FROM_EMAIL || 'no-reply@farm-direct.local').trim();
 }
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -120,7 +73,6 @@ function getFrontendBase(req) {
 async function sendPasswordResetEmail({ email, resetLink }) {
   if (!email) return false;
   try {
-    // Prefer Brevo transactional API via emailService
     if (process.env.BREVO_API_KEY) {
       try {
         console.log(`[Password Reset] Sending reset email via Brevo to ${email}`);
@@ -129,30 +81,16 @@ async function sendPasswordResetEmail({ email, resetLink }) {
           console.log(`[Password Reset] Email sent successfully to ${email}`);
           return true;
         }
-        console.warn('[Password Reset] Brevo send returned false, falling back to other methods');
+        console.warn('[Password Reset] Brevo send returned false');
       } catch (e) {
         console.warn('[Password Reset] Brevo send failed:', e && e.message ? e.message : e);
       }
     }
 
-    // Fallback to existing transactional helper (which will also use Brevo if available)
-    if (smtpAvailable()) {
-      try {
-        console.log(`[Password Reset] Sending email to ${email} via configured transactional helper...`);
-        const result = await sendMailWithFallbacks({
-          from: getFromAddress(),
-          to: email,
-          subject: 'Password reset request',
-          text: `You requested a password reset. Use this link to reset your password (valid for 1 hour): ${resetLink}`,
-          html: `<p>You requested a password reset. Click the link below to reset your password (valid for 1 hour):</p><p><a href="${resetLink}">${resetLink}</a></p>`,
-        }, 'Password Reset');
-        console.log(`[Password Reset] Email sent successfully to ${email}. Message ID: ${result.info && result.info.messageId ? result.info.messageId : 'n/a'}`);
-        return true;
-      } catch (e) {
-        console.warn(`[Password Reset] transactional send failed: ${e?.message || e}. Falling back to console log.`);
-        console.log(`[Password Reset] Reset link for ${email}: ${resetLink}`);
-        return false;
-      }
+    // No SMTP fallbacks: in development return a helpful log when debug enabled
+    if ((process.env.NODE_ENV || 'development') !== 'production' && process.env.DEBUG_OTP === 'true') {
+      console.log(`[DEV] Password reset link for ${email}: ${resetLink}`);
+      return true;
     }
 
     console.log(`[Password Reset] Email service not configured. Reset link for ${email}: ${resetLink}`);
@@ -161,34 +99,6 @@ async function sendPasswordResetEmail({ email, resetLink }) {
     console.warn('[Password Reset] Unexpected error sending reset email:', e && e.message ? e.message : e);
     return false;
   }
-}
-
-async function sendTransactionalEmail({ to, subject, text, html, tag }) {
-  if (!to) return false;
-
-  if (smtpAvailable()) {
-    try {
-      await sendMailWithFallbacks({
-        from: getFromAddress(),
-        to,
-        subject,
-        text,
-        html,
-      }, tag);
-      return true;
-    } catch (e) {
-      console.warn(`[${tag}] Failed to send SMTP email: ${e?.message || e}`);
-      console.log(`[${tag}] Fallback log for ${to}`);
-      console.log(`[${tag}] Subject: ${subject}`);
-      console.log(`[${tag}] Body: ${text}`);
-      return false;
-    }
-  }
-
-  console.log(`[${tag}] SMTP not configured. Email to ${to}`);
-  console.log(`[${tag}] Subject: ${subject}`);
-  console.log(`[${tag}] Body: ${text}`);
-  return false;
 }
 
 function getOrderPartyDetails(order) {
@@ -410,94 +320,36 @@ async function sendOtpEmail(req, res, { resend = false } = {}) {
   otps.push({ email, otpHash, expiresAt });
   saveOtps(otps);
   console.log(`[OTP SEND] ✓ OTP stored for ${email}, expires at: ${new Date(expiresAt).toISOString()}`);
-  // Prefer Brevo API for OTP sends if configured
+  // Prefer Brevo API for OTP sends
   if (process.env.BREVO_API_KEY && typeof brevoSendOtp === 'function') {
     try {
       console.log('[OTP SEND] Sending OTP via Brevo API');
       await brevoSendOtp(email, otp);
       return res.json({ success: true, message: resend ? 'OTP resent to your email' : 'OTP sent to your email', resend });
     } catch (brevoErr) {
-      console.error('[OTP SEND] Brevo send failed, falling back to SMTP if available:', brevoErr && brevoErr.message ? brevoErr.message : brevoErr);
-      // continue to SMTP fallback below
+      console.error('[OTP SEND] Brevo send failed:', brevoErr && brevoErr.message ? brevoErr.message : brevoErr);
+      const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+      if ((process.env.NODE_ENV || 'development') !== 'production' && process.env.DEBUG_OTP === 'true') {
+        console.log(`[OTP SEND] Development fallback OTP for ${email}: ${otp}`);
+        return res.json({ success: true, message: 'OTP generated (Brevo send failed)', debugOtp, resend });
+      }
+      return res.status(502).json({ error: 'Failed to send OTP via Brevo', message: 'Please try again later', debugOtp, timestamp: new Date().toISOString() });
     }
   }
 
-  const fromAddress = getFromAddress();
-  const subject = 'Your Farm Direct Verification Code';
-  const text = `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`;
-  const html = `<html><body><p>Your <strong>Farm Direct</strong> verification code is:</p><h2 style="color: #2ecc71; font-size: 32px; letter-spacing: 5px;">${otp}</h2><p>This code expires in <strong>5 minutes</strong>.</p><p>If you didn't request this code, please ignore this email.</p></body></html>`;
-
-  console.log('[OTP SEND] SMTP connection state:', smtpAvailable() ? 'ready' : 'not configured');
-  console.log('[OTP SEND] From address:', fromAddress);
-  console.log('[OTP SEND] OTP generated:', { email, expiresAt: new Date(expiresAt).toISOString() });
-
-  if (!smtpAvailable()) {
-    const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-    console.error('[OTP SEND] SMTP transporter not configured');
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[OTP SEND] Development fallback OTP for ${email}: ${otp}`);
-      return res.json({ success: true, message: 'OTP generated (SMTP not configured)', debugOtp, resend });
-    }
-    return res.status(503).json({
-      error: 'Email service unavailable',
-      message: 'OTP could not be sent because SMTP is not configured',
-      debugOtp,
-      timestamp: new Date().toISOString(),
-    });
+  // No Brevo configured: development-only debug fallback, otherwise error
+  const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+  if ((process.env.NODE_ENV || 'development') !== 'production' && process.env.DEBUG_OTP === 'true') {
+    console.log(`[OTP SEND] Development fallback OTP for ${email}: ${otp}`);
+    return res.json({ success: true, message: 'OTP generated (Brevo not configured)', debugOtp, resend });
   }
 
-  try {
-    const result = await sendMailWithFallbacks({
-      from: fromAddress,
-      to: email,
-      subject,
-      text,
-      html,
-    }, 'OTP SEND');
-    return res.json({ success: true, message: resend ? 'OTP resent to your email' : 'OTP sent to your email', resend });
-  } catch (smtpErr) {
-    console.error('[OTP SEND] ✗ SMTP send failed:', smtpErr?.message || smtpErr);
-    console.error('[OTP SEND] Full error:', smtpErr);
-    const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-
-    // Detect common SMTP failure modes and return helpful messages
-    const respCode = smtpErr?.responseCode || smtpErr?.code;
-    const respText = String(smtpErr?.response || smtpErr?.message || '').toLowerCase();
-    const unauthorizedIp = respCode === 525 || /unauthorized ip/i.test(respText) || /unauthorized ip address/i.test(respText);
-    const authError = smtpErr?.code === 'EAUTH' || /auth/i.test(String(smtpErr?.command || ''));
-    const timedOut = smtpErr?.code === 'ETIMEDOUT' || /timeout/i.test(String(smtpErr?.message || ''));
-
-    if (unauthorizedIp || (authError && /unauthorized ip/i.test(respText))) {
-      const hint = 'SMTP provider rejected connection: unauthorized IP address. Allowlist your Render service outbound IP(s) in Brevo (smtp-relay) or contact Brevo support.';
-      console.error('[OTP SEND] ✗ SMTP unauthorized IP. Hint:', hint);
-      return res.status(502).json({
-        error: 'Failed to send OTP via SMTP',
-        message: 'SMTP provider rejected connection: unauthorized IP address',
-        hint,
-        debugOtp,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    if (timedOut) {
-      const hint = 'Connection timed out. Try using port 587 (STARTTLS) or 2525 and ensure Render allows outbound SMTP traffic on that port.';
-      console.error('[OTP SEND] ✗ SMTP connection timed out. Hint:', hint);
-      return res.status(502).json({
-        error: 'Failed to send OTP via SMTP',
-        message: 'SMTP connection timed out',
-        hint,
-        debugOtp,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    return res.status(502).json({
-      error: 'Failed to send OTP via SMTP',
-      message: 'Please try again later',
-      debugOtp,
-      timestamp: new Date().toISOString(),
-    });
-  }
+  return res.status(503).json({
+    error: 'Email service unavailable',
+    message: 'OTP could not be sent because Brevo is not configured',
+    debugOtp,
+    timestamp: new Date().toISOString(),
+  });
 }
 
 // Send OTP to an email for verification (used during signup)
@@ -1229,7 +1081,7 @@ app.get('/api/debug/otp-config', (req, res) => {
       pass: process.env.SMTP_PASS || process.env.SMTP_KEY ? (process.env.SMTP_PASS ? '✓ set (' + (process.env.SMTP_PASS || '').substring(0, 10) + '...)' : '✓ set') : '✗ missing',
       fromEmail: process.env.EMAIL_FROM || process.env.FROM_EMAIL ? '✓ ' + (process.env.EMAIL_FROM || process.env.FROM_EMAIL) : '✗ missing',
     },
-    transporter: smtpAvailable() ? `✓ ${Object.keys(smtpTransportersByPort).length} transport(s)` : '✗ not initialized',
+    transporter: process.env.BREVO_API_KEY ? '✓ Brevo configured' : '✗ Brevo not configured',
     frontendUrl: process.env.FRONTEND_URL || '✗ missing',
   });
 });
