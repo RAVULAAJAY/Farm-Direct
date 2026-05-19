@@ -1,10 +1,10 @@
 Auto-fix helper scripts
 
 1) test-smtp.js
-- Purpose: verify SMTP credentials and send a test email.
+- Purpose: verify Brevo transactional email settings and send a test email.
 - Usage:
-  - Install deps: `npm install nodemailer dotenv`
-  - Ensure `farm-direct-api.env` is present in the repo root (or export SMTP_* env vars).
+  - Install deps: `npm install @getbrevo/brevo dotenv`
+  - Ensure `farm-direct-api.env` is present in the repo root with `BREVO_API_KEY` and `FROM_EMAIL` (or export `BREVO_API_KEY`/`FROM_EMAIL` env vars).
   - Run: `node tools/test-smtp.js`
 
 2) render-update-secret-template.sh

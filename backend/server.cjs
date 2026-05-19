@@ -6,155 +6,58 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const brevoSendOtp = require('./sendOtpEmail');
 
-// Initialize SMTP transporters (mapped by port) and read envs (support legacy and new names)
-const smtpTransportersByPort = {};
-const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
-const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
-// Support both new and legacy env names
-const SMTP_USER = String(process.env.SMTP_USER || process.env.SMTP_LOGIN || '').trim();
-const SMTP_PASS = String(process.env.SMTP_PASS || process.env.SMTP_KEY || '').trim();
-const FROM_EMAIL = String(process.env.EMAIL_FROM || process.env.FROM_EMAIL || '').trim();
-const SMTP_CONNECTION_TIMEOUT = Number(process.env.SMTP_CONNECTION_TIMEOUT || 20000);
-const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT || 20000);
-
+// SMTP/SMTP-relay removed. Use Brevo transactional API when `BREVO_API_KEY` is set.
 function getFromAddress() {
-  return FROM_EMAIL || SMTP_USER || 'no-reply@farm-direct.local';
-}
-
-function getMailSenderCandidates() {
-  const preferredFrom = String(FROM_EMAIL || '').trim();
-  const loginFrom = String(SMTP_USER || '').trim();
-  const candidates = [];
-
-  // Prefer sending from the SMTP login (Brevo-verified) to avoid rejections
-  if (loginFrom) {
-    candidates.push({
-      label: `smtp login sender ${loginFrom}`,
-      from: loginFrom,
-      replyTo: preferredFrom || loginFrom,
-    });
-  }
-
-  // If a custom display 'from' is configured, try it as a fallback (but after loginFrom)
-  if (preferredFrom && preferredFrom !== loginFrom) {
-    candidates.push({
-      label: `custom sender ${preferredFrom}`,
-      from: preferredFrom,
-      replyTo: loginFrom || preferredFrom,
-    });
-  }
-
-  return candidates;
-}
-
-function createSmtpTransport(port, secureOverride) {
-  const nodemailer = require('nodemailer');
-  const secure = typeof secureOverride === 'boolean' ? secureOverride : port === 465;
-
-  const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port,
-    secure,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-    authMethod: 'LOGIN',
-    requireTLS: true,
-    connectionTimeout: SMTP_CONNECTION_TIMEOUT,
-    greetingTimeout: SMTP_CONNECTION_TIMEOUT,
-    socketTimeout: SMTP_SOCKET_TIMEOUT,
-    family: 4,
-    tls: {
-      minVersion: 'TLSv1.2',
-      rejectUnauthorized: true,
-    },
-  });
-
-  // Verify right away so we log any connection issues early
-  void transporter.verify().then(() => {
-    console.log(`[SMTP] Verify OK for ${SMTP_HOST}:${port}`);
-  }).catch((err) => {
-    console.warn(`[SMTP] Verify failed for ${SMTP_HOST}:${port}:`, err && err.message ? err.message : err);
-  });
-
-  return transporter;
-}
-
-function getSmtpTransportCandidates() {
-  const candidates = [];
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return candidates;
-
-  // Try the configured port first, then common alternates
-  const portsToTry = Array.from(new Set([Number(SMTP_PORT || 587), 587, 465, 2525].map(Number)));
-
-  for (const port of portsToTry) {
-    if (!port || Number.isNaN(port)) continue;
-    if (!smtpTransportersByPort[port]) {
-      smtpTransportersByPort[port] = createSmtpTransport(port, port === 465);
-    }
-    candidates.push({ label: `${SMTP_HOST}:${port}`, transporter: smtpTransportersByPort[port] });
-  }
-
-  return candidates;
+  return String(process.env.EMAIL_FROM || process.env.FROM_EMAIL || process.env.SMTP_USER || 'no-reply@farm-direct.local').trim();
 }
 
 function smtpAvailable() {
-  try {
-    const candidates = getSmtpTransportCandidates();
-    return Array.isArray(candidates) && candidates.length > 0;
-  } catch (e) {
-    return false;
-  }
+  return Boolean(process.env.BREVO_API_KEY);
 }
 
 async function sendMailWithFallbacks(mailOptions, tag) {
-  const candidates = getSmtpTransportCandidates();
-  const senderCandidates = getMailSenderCandidates();
-
-  for (const candidate of candidates) {
-    for (const senderCandidate of senderCandidates) {
-      try {
-        const mergedMailOptions = {
-          ...mailOptions,
-          from: senderCandidate.from,
-          replyTo: senderCandidate.replyTo,
-        };
-        console.log(`[${tag}] Attempting SMTP send via ${candidate.label} using ${senderCandidate.label}`);
-        const info = await candidate.transporter.sendMail(mergedMailOptions);
-        console.log(`[${tag}] ✓ SMTP email sent successfully via ${candidate.label} using ${senderCandidate.label}. Message ID: ${info.messageId}`);
-        return { ok: true, info, transport: candidate.label, sender: senderCandidate.from };
-      } catch (error) {
-        const message = error?.message || String(error);
-        const errorSummary = {
-          code: error?.code,
-          command: error?.command,
-          responseCode: error?.responseCode,
-          response: error?.response,
-          message,
-        };
-        console.warn(`[${tag}] SMTP send failed via ${candidate.label} using ${senderCandidate.label}:`, errorSummary);
-        if (candidate === candidates[candidates.length - 1] && senderCandidate === senderCandidates[senderCandidates.length - 1]) {
-          throw error;
-        }
-      }
-    }
+  if (!process.env.BREVO_API_KEY) {
+    throw new Error('Email delivery disabled: no BREVO_API_KEY configured');
   }
 
-  throw new Error('SMTP send failed for all configured transports');
-}
-
-if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
   try {
-    // Pre-create transports for primary and fallback ports so verify runs at startup
-    getSmtpTransportCandidates();
-    console.log(`[SMTP] Configured for host ${SMTP_HOST}:${SMTP_PORT} using login ${SMTP_USER}`);
-  } catch (e) {
-    console.warn('[SMTP] Initialization failed, emails will be logged to console', e && e.message ? e.message : e);
+    const brevo = require('@getbrevo/brevo');
+    const apiInstance = new brevo.TransactionalEmailsApi();
+    apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
+
+    const sendSmtpEmail = new brevo.SendSmtpEmail();
+    sendSmtpEmail.subject = mailOptions.subject || '';
+    sendSmtpEmail.htmlContent = mailOptions.html || mailOptions.htmlContent || (mailOptions.text ? `<pre>${mailOptions.text}</pre>` : '');
+    sendSmtpEmail.textContent = mailOptions.text || mailOptions.textContent || '';
+    sendSmtpEmail.sender = {
+      name: process.env.FROM_NAME || 'Farm Direct',
+      email: process.env.FROM_EMAIL || process.env.EMAIL_FROM || 'no-reply@farm-direct.local',
+    };
+
+    const to = [];
+    if (Array.isArray(mailOptions.to)) {
+      for (const t of mailOptions.to) {
+        if (typeof t === 'string') to.push({ email: t });
+        else if (t && t.email) to.push({ email: t.email, name: t.name });
+      }
+    } else if (typeof mailOptions.to === 'string') {
+      to.push({ email: mailOptions.to });
+    } else if (mailOptions.to && mailOptions.to.email) {
+      to.push({ email: mailOptions.to.email, name: mailOptions.to.name });
+    }
+
+    if (to.length === 0) throw new Error('No recipient specified for transactional email');
+    sendSmtpEmail.to = to;
+
+    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+    console.log(`[${tag}] Brevo send result:`, result);
+    return { ok: true, info: result };
+  } catch (err) {
+    console.warn(`[${tag}] Brevo send failed:`, err && err.message ? err.message : err);
+    throw err;
   }
-} else {
-  console.warn('[SMTP] Missing SMTP_HOST, SMTP_USER, or SMTP_PASS - outgoing emails will be logged to the server console');
 }
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -557,6 +460,17 @@ async function sendOtpEmail(req, res, { resend = false } = {}) {
   otps.push({ email, otpHash, expiresAt });
   saveOtps(otps);
   console.log(`[OTP SEND] ✓ OTP stored for ${email}, expires at: ${new Date(expiresAt).toISOString()}`);
+  // Prefer Brevo API for OTP sends if configured
+  if (process.env.BREVO_API_KEY && typeof brevoSendOtp === 'function') {
+    try {
+      console.log('[OTP SEND] Sending OTP via Brevo API');
+      await brevoSendOtp(email, otp);
+      return res.json({ success: true, message: resend ? 'OTP resent to your email' : 'OTP sent to your email', resend });
+    } catch (brevoErr) {
+      console.error('[OTP SEND] Brevo send failed, falling back to SMTP if available:', brevoErr && brevoErr.message ? brevoErr.message : brevoErr);
+      // continue to SMTP fallback below
+    }
+  }
 
   const fromAddress = getFromAddress();
   const subject = 'Your Farm Direct Verification Code';
@@ -962,7 +876,7 @@ app.post('/api/auth/forgot', async (req, res) => {
   const frontendBase = getFrontendBase(req);
   const resetLink = `${frontendBase}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
 
-  // Try to send email via nodemailer if configured, otherwise log
+  // Try to send email via Brevo API if configured, otherwise log
   let emailed = false;
   try {
     emailed = await sendPasswordResetEmail({ email, resetLink });

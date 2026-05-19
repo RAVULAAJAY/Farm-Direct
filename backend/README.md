@@ -57,22 +57,17 @@ The backend uses JSON files for data storage:
 
 - Express.js
 - CORS
-- Nodemailer
+- @getbrevo/brevo
 - UUID
 - Body Parser
 
-## Password Reset Email Setup
+## Email Setup (Brevo)
 
-To send real password reset emails, configure these environment variables before starting the backend:
+To send real password reset and OTP emails, configure Brevo transactional email API variables before starting the backend:
 
-- `FRONTEND_URL` - public frontend URL used in reset links, for example `https://your-app.vercel.app`
-- `SMTP_HOST` - your SMTP server host
-- `SMTP_PORT` - SMTP port, usually `587`
-- `SMTP_LOGIN` - SMTP username/login
-- `SMTP_KEY` - SMTP password or app password
+- `BREVO_API_KEY` - your Brevo API key
 - `FROM_EMAIL` - sender address shown in reset emails and OTP emails
+- `FROM_NAME` - optional sender display name
 - `DEBUG_PASSWORD_RESET` - set to `true` in development only if you want the API to return a debug reset link
 
-When a user submits the forgot-password form, the backend stores a one-hour reset token, emails a reset link, and the reset page at `/reset-password` lets the user set a new password.
-
-OTP emails use the same SMTP credentials and are sent from the `/api/auth/send-otp` and `/api/auth/resend-otp` endpoints.
+When a user submits the forgot-password form, the backend stores a one-hour reset token and sends a reset link via the Brevo API. OTP emails are sent from the `/api/auth/send-otp` and `/api/auth/resend-otp` endpoints.

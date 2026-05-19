@@ -9,11 +9,11 @@
     "dev": "node server.cjs"
   },
   "dependencies": {
+    "@getbrevo/brevo": "^5.0.4",
     "body-parser": "^2.2.2",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
-    "nodemailer": "^6.10.1",
     "pg": "^8.20.0",
     "socket.io": "^4.7.2",
     "uuid": "^13.0.0"
