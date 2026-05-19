@@ -23,23 +23,25 @@ function getFromAddress() {
 }
 
 function getMailSenderCandidates() {
-  const preferredFrom = getFromAddress();
-  const loginFrom = SMTP_USER && SMTP_USER !== preferredFrom ? SMTP_USER : '';
+  const preferredFrom = String(FROM_EMAIL || '').trim();
+  const loginFrom = String(SMTP_USER || '').trim();
   const candidates = [];
 
-  if (preferredFrom) {
-    candidates.push({
-      label: `preferred sender ${preferredFrom}`,
-      from: preferredFrom,
-      replyTo: SMTP_USER || preferredFrom,
-    });
-  }
-
+  // Prefer sending from the SMTP login (Brevo-verified) to avoid rejections
   if (loginFrom) {
     candidates.push({
       label: `smtp login sender ${loginFrom}`,
       from: loginFrom,
-      replyTo: preferredFrom,
+      replyTo: preferredFrom || loginFrom,
+    });
+  }
+
+  // If a custom display 'from' is configured, try it as a fallback (but after loginFrom)
+  if (preferredFrom && preferredFrom !== loginFrom) {
+    candidates.push({
+      label: `custom sender ${preferredFrom}`,
+      from: preferredFrom,
+      replyTo: loginFrom || preferredFrom,
     });
   }
 
