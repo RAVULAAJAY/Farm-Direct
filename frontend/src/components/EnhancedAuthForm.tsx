@@ -163,31 +163,88 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
 
   const handleSendOtp = async () => {
     const email = formData.email?.trim();
-    if (!email) { setFieldError('email', 'Email is required'); return; }
+    if (!email) {
+      console.error('[OTP] Email is required');
+      setFieldError('email', 'Email is required');
+      return;
+    }
+    
+    console.log('[OTP] handleSendOtp starting for:', email);
     setSendingOtp(true);
+    setGeneralError('');
+    
     try {
-      await api.sendOtp(email);
+      console.log('[OTP] Calling api.sendOtp...');
+      const response = await api.sendOtp(email);
+      console.log('[OTP] Response:', response);
+      
       setOtpSent(true);
       setEmailVerified(false);
-      window.alert('OTP sent to email (check console if SMTP not configured).');
-    } catch (e) {
-      console.error('Failed to send OTP', e);
-      window.alert('Unable to send OTP right now.');
-    } finally { setSendingOtp(false); }
+      setGeneralError('');
+      
+      // Enhanced user feedback
+      const message = response?.message || 'OTP sent to your email. Check your inbox and spam folder.';
+      console.log('[OTP] Success message:', message);
+      alert(message);
+    } catch (e: any) {
+      console.error('[OTP] Error caught:', e);
+      const errorMsg = e?.message || String(e) || 'Unable to send OTP right now. Please try again.';
+      console.error('[OTP] Error message:', errorMsg);
+      
+      setGeneralError(errorMsg);
+      setOtpSent(false);
+      
+      // Show detailed error to user
+      alert(`Failed to send OTP: ${errorMsg}\n\nPlease check your email address and try again.`);
+    } finally {
+      setSendingOtp(false);
+    }
   };
 
   const handleVerifyOtp = async () => {
     const email = formData.email?.trim();
-    if (!email || !otpValue) { setFieldError('otp', 'Email and OTP required'); return; }
+    if (!email) {
+      console.error('[OTP Verify] Email is required');
+      setFieldError('email', 'Email is required');
+      return;
+    }
+    
+    if (!otpValue.trim()) {
+      console.error('[OTP Verify] OTP is required');
+      setFieldError('otp', 'OTP is required');
+      return;
+    }
+
+    console.log('[OTP Verify] Starting verification for:', email, 'OTP length:', otpValue.trim().length);
     setVerifyingOtp(true);
+    setGeneralError('');
+    
     try {
-      await api.verifyOtp(email, otpValue.trim());
+      console.log('[OTP Verify] Calling api.verifyOtp...');
+      const response = await api.verifyOtp(email, otpValue.trim());
+      console.log('[OTP Verify] Response:', response);
+      
       setEmailVerified(true);
-      window.alert('Email verified');
-    } catch (e) {
-      console.error('OTP verification failed', e);
-      window.alert('Invalid or expired OTP');
-    } finally { setVerifyingOtp(false); }
+      setGeneralError('');
+      setFieldErrors({});
+      
+      const message = response?.message || 'Email verified successfully!';
+      console.log('[OTP Verify] Success message:', message);
+      alert(message);
+    } catch (e: any) {
+      console.error('[OTP Verify] Error caught:', e);
+      const errorMsg = e?.message || String(e) || 'Invalid or expired OTP. Please request a new one.';
+      console.error('[OTP Verify] Error message:', errorMsg);
+      
+      setEmailVerified(false);
+      setFieldError('otp', errorMsg);
+      setGeneralError(errorMsg);
+      
+      // Show detailed error to user
+      alert(`OTP Verification Failed: ${errorMsg}\n\nIf the OTP expired, request a new one.`);
+    } finally {
+      setVerifyingOtp(false);
+    }
   };
 
   const setFieldError = (field: string, message: string) => {

@@ -341,15 +341,33 @@ const allowedOrigins = [
   'http://localhost:8080',
   'http://localhost:3000',
 ].filter(Boolean);
+
+console.log('[CORS] Configured allowed origins:', allowedOrigins);
+
 app.use(cors({
   origin: function(origin, callback) {
     // allow requests with no origin (like mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    if (!origin) {
+      console.log('[CORS] ✓ Request allowed (no origin header)');
+      return callback(null, true);
+    }
+    
+    if (allowedOrigins.includes(origin)) {
+      console.log(`[CORS] ✓ Origin allowed (in list): ${origin}`);
+      return callback(null, true);
+    }
+    
+    if (origin.endsWith('.vercel.app')) {
+      console.log(`[CORS] ✓ Origin allowed (*.vercel.app): ${origin}`);
+      return callback(null, true);
+    }
+    
+    console.warn(`[CORS] ✗ Origin REJECTED: ${origin}`);
     return callback(new Error('CORS not allowed from this origin: ' + origin), false);
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }));
 app.use(express.json({ limit: '10mb' }));
 
@@ -395,86 +413,117 @@ app.post('/api/users', (req, res) => {
 // Send OTP to an email for verification (used during signup)
 app.post('/api/auth/send-otp', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
-  if (!email) return res.status(400).json({ error: 'Email is required' });
+  if (!email) {
+    console.error('[OTP SEND] Email missing in request body');
+    return res.status(400).json({ error: 'Email is required' });
+  }
 
-  // create 6-digit OTP
+  console.log(`[OTP SEND] ✓ Request received for email: ${email}`);
+
+  // Create 6-digit OTP
   const otp = String(Math.floor(100000 + Math.random() * 900000));
   const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
   const expiresAt = Date.now() + (5 * 60 * 1000); // 5 minutes
 
-  // remove existing for email
+  // Remove existing OTP for this email
   otps = otps.filter((e) => e.email !== email);
   otps.push({ email, otpHash, expiresAt });
   saveOtps(otps);
+  console.log(`[OTP SEND] ✓ OTP stored for ${email}, expires at: ${new Date(expiresAt).toISOString()}`);
 
   try {
     if (!smtpTransporter) {
-      console.log(`[OTP] SMTP not configured, OTP for ${email}: ${otp}`);
-      return res.json({ success: true, message: 'OTP generated (SMTP not configured - check console)' });
+      console.warn(`[OTP SEND] ⚠ SMTP transporter not configured`);
+      const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
+      console.log(`[OTP SEND] Console Fallback - OTP for ${email}: ${otp}`);
+      return res.json({ success: true, message: 'OTP generated (SMTP not configured - check console)', debugOtp });
     }
 
     const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || 'no-reply@farm-direct.local';
+    console.log(`[OTP SEND] Attempting to send via SMTP from: ${fromAddress}`);
+
     try {
       const info = await smtpTransporter.sendMail({
         from: fromAddress,
         to: email,
-        subject: 'Your verification code',
+        subject: 'Your Farm Direct Verification Code',
         text: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
-        html: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
+        html: `<html><body><p>Your <strong>Farm Direct</strong> verification code is:</p><h2 style="color: #2ecc71; font-size: 32px; letter-spacing: 5px;">${otp}</h2><p>This code expires in <strong>5 minutes</strong>.</p><p>If you didn't request this code, please ignore this email.</p></body></html>`,
       });
-      console.log(`[OTP] SMTP Email sent to ${email}. Message ID: ${info.messageId}`);
+      console.log(`[OTP SEND] ✓ SMTP Email sent successfully to ${email}. Message ID: ${info.messageId}`);
       return res.json({ success: true, message: 'OTP sent to your email' });
     } catch (smtpErr) {
-      console.warn('[OTP] SMTP send failed, attempting Brevo HTTP API fallback:', smtpErr && smtpErr.message ? smtpErr.message : smtpErr);
+      console.error('[OTP SEND] ✗ SMTP send failed:', smtpErr?.message || smtpErr);
+      console.error('[OTP SEND] Full error:', smtpErr);
 
       // Try Brevo HTTP API fallback if API key is available
       const brevoKey = process.env.BREVO_API_KEY;
       if (!brevoKey) {
-        console.error('[OTP] No BREVO_API_KEY in env; SMTP failed and API fallback not available');
-        console.error('[OTP] SMTP Error details:', smtpErr);
-        console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+        console.error('[OTP SEND] ✗ No BREVO_API_KEY available, cannot use fallback');
         const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-        return res.status(500).json({ error: 'Failed to send OTP (SMTP failed, no API key)', fallback: debugOtp, debugOtp });
+        console.log(`[OTP SEND] Console Fallback - OTP for ${email}: ${otp}`);
+        return res.status(500).json({
+          error: 'Failed to send OTP (SMTP failed, no API key)',
+          debugOtp,
+          timestamp: new Date().toISOString(),
+        });
       }
+
+      console.log('[OTP SEND] → Attempting Brevo HTTP API fallback...');
 
       try {
         const body = {
-          sender: { name: 'FarmDirect', email: fromAddress },
+          sender: { name: 'Farm Direct', email: fromAddress },
           to: [{ email }],
-          subject: 'Your verification code',
+          subject: 'Your Farm Direct Verification Code',
           textContent: `Your FarmDirect verification code is ${otp}. It expires in 5 minutes.`,
-          htmlContent: `<p>Your FarmDirect verification code is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
+          htmlContent: `<html><body><p>Your <strong>Farm Direct</strong> verification code is:</p><h2 style="color: #2ecc71; font-size: 32px; letter-spacing: 5px;">${otp}</h2><p>This code expires in <strong>5 minutes</strong>.</p><p>If you didn't request this code, please ignore this email.</p></body></html>`,
         };
+
+        console.log(`[OTP SEND] Brevo API Request Body:`, { to: body.to, sender: body.sender, subject: body.subject });
 
         const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
           method: 'POST',
           headers: { 'api-key': brevoKey, 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          timeout: 10000,
         });
 
         if (!resp.ok) {
           const text = await resp.text().catch(() => 'no response body');
-          console.error('[OTP] Brevo HTTP API send failed:', resp.status, text);
-          console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+          console.error(`[OTP SEND] ✗ Brevo HTTP API failed with status ${resp.status}`);
+          console.error(`[OTP SEND] Response:`, text);
           const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-          return res.status(500).json({ error: 'Failed to send OTP (Brevo API failed)', fallback: debugOtp, debugOtp, brevoStatus: resp.status });
+          return res.status(500).json({
+            error: `Failed to send OTP (Brevo API error ${resp.status})`,
+            debugOtp,
+            brevoStatus: resp.status,
+            timestamp: new Date().toISOString(),
+          });
         }
 
         const data = await resp.json().catch(() => ({}));
-        console.log('[OTP] Brevo HTTP API email sent successfully', data);
+        console.log(`[OTP SEND] ✓ Brevo HTTP API sent successfully`, data);
         return res.json({ success: true, message: 'OTP sent via Brevo API' });
       } catch (apiErr) {
-        console.error('[OTP] Brevo API HTTP request failed:', apiErr && apiErr.message ? apiErr.message : apiErr);
-        console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+        console.error('[OTP SEND] ✗ Brevo API HTTP request failed:', apiErr?.message || apiErr);
         const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-        return res.status(500).json({ error: 'Failed to send OTP (API HTTP failed)', fallback: debugOtp, debugOtp });
+        console.log(`[OTP SEND] Console Fallback - OTP for ${email}: ${otp}`);
+        return res.status(500).json({
+          error: 'Failed to send OTP (API request failed)',
+          debugOtp,
+          timestamp: new Date().toISOString(),
+        });
       }
     }
   } catch (e) {
-    console.error('[OTP] Unexpected error in send-otp:', e && e.message ? e.message : e);
-    console.log(`[OTP] Fallback - OTP for ${email}: ${otp}`);
+    console.error('[OTP SEND] ✗ Unexpected error:', e?.message || e);
     const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-    res.status(500).json({ error: 'Failed to send OTP. Please try again.', fallback: debugOtp, debugOtp });
+    return res.status(500).json({
+      error: 'Failed to send OTP. Please try again.',
+      debugOtp,
+      timestamp: new Date().toISOString(),
+    });
   }
 });
 
@@ -482,13 +531,28 @@ app.post('/api/auth/send-otp', async (req, res) => {
 app.post('/api/auth/verify-otp', (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
   const otp = String((req.body && req.body.otp) || '').trim();
-  if (!email || !otp) return res.status(400).json({ error: 'Email and otp are required' });
+
+  console.log(`[OTP VERIFY] Request received for email: ${email}, OTP length: ${otp.length}`);
+
+  if (!email || !otp) {
+    console.error('[OTP VERIFY] ✗ Missing email or OTP');
+    return res.status(400).json({ error: 'Email and OTP are required' });
+  }
 
   const entryIndex = otps.findIndex((e) => e.email === email);
-  if (entryIndex < 0) return res.status(400).json({ error: 'OTP not found or expired' });
+  if (entryIndex < 0) {
+    console.warn(`[OTP VERIFY] ✗ No OTP found for email: ${email}`);
+    return res.status(400).json({ error: 'OTP not found or expired' });
+  }
 
   const entry = otps[entryIndex];
-  if (Date.now() > Number(entry.expiresAt)) {
+  const now = Date.now();
+  const expiresAt = Number(entry.expiresAt);
+  const isExpired = now > expiresAt;
+
+  if (isExpired) {
+    const expiredSeconds = Math.floor((now - expiresAt) / 1000);
+    console.warn(`[OTP VERIFY] ✗ OTP expired for ${email} (${expiredSeconds}s ago)`);
     otps.splice(entryIndex, 1);
     saveOtps(otps);
     return res.status(400).json({ error: 'OTP expired' });
@@ -496,14 +560,16 @@ app.post('/api/auth/verify-otp', (req, res) => {
 
   const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
   if (otpHash !== entry.otpHash) {
+    console.warn(`[OTP VERIFY] ✗ Invalid OTP for ${email} (hash mismatch)`);
     return res.status(400).json({ error: 'Invalid OTP' });
   }
 
-  // valid - remove entry
+  // Valid - remove entry
   otps.splice(entryIndex, 1);
   saveOtps(otps);
 
-  res.json({ success: true });
+  console.log(`[OTP VERIFY] ✓ Email verified successfully for: ${email}`);
+  res.json({ success: true, message: 'Email verified successfully' });
 });
 app.put('/api/users/:id', (req, res) => {
   const idx = users.findIndex((u) => u.id === req.params.id);

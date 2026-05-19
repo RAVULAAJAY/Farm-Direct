@@ -1,23 +1,56 @@
 import { Product, ProductReview, User, Order, Message } from '@/lib/data';
 
+// Determine API base URL intelligently
 const isLocalHost = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 const defaultApiBase = isLocalHost ? 'http://localhost:4000/api' : 'https://farm-direct-api.onrender.com/api';
 const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? defaultApiBase;
 const API_BASE = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
 
+// Log API configuration (development only)
+if (import.meta.env.DEV) {
+  console.log('[API Config] Hostname:', window.location.hostname);
+  console.log('[API Config] Is Local:', isLocalHost);
+  console.log('[API Config] VITE_API_BASE:', import.meta.env.VITE_API_BASE);
+  console.log('[API Config] Final API_BASE:', API_BASE);
+}
+
 export { API_BASE };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-
-  if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${res.statusText}`);
+  const fullUrl = `${API_BASE}${path}`;
+  
+  if (import.meta.env.DEV) {
+    console.log(`[API Request] ${options.method || 'GET'} ${fullUrl}`);
   }
 
-  return (await res.json()) as T;
+  try {
+    const res = await fetch(fullUrl, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+
+    if (!res.ok) {
+      let errorBody: any = {};
+      try {
+        errorBody = await res.json();
+      } catch (e) {
+        errorBody = { text: await res.text() };
+      }
+      
+      const errorMsg = errorBody?.error || errorBody?.message || res.statusText;
+      console.error(`[API Error] ${res.status}: ${errorMsg}`, errorBody);
+      throw new Error(`API error ${res.status}: ${errorMsg}`);
+    }
+
+    const data = (await res.json()) as T;
+    if (import.meta.env.DEV) {
+      console.log(`[API Response] ${path}:`, data);
+    }
+    return data;
+  } catch (err) {
+    console.error(`[API Exception] ${path}:`, err);
+    throw err;
+  }
 }
 
 export const fetchUsers = () => request<User[]>('/users');
@@ -38,8 +71,35 @@ export const fetchOrders = () => request<Order[]>('/orders');
 export const createOrder = (order: Omit<Order, 'id' | 'orderDate' | 'status' | 'deliveryStatus'>) => request<Order>('/orders', { method: 'POST', body: JSON.stringify(order) });
 export const updateOrderApi = (id: string, updates: Partial<Order>) => request<Order>(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 export const cancelOrderApi = (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' });
-export const sendOtp = (email: string) => request<Record<string, any>>('/auth/send-otp', { method: 'POST', body: JSON.stringify({ email }) });
-export const verifyOtp = (email: string, otp: string) => request<Record<string, any>>('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ email, otp }) });
+export const sendOtp = async (email: string) => {
+  console.log('[OTP Send] Starting for email:', email);
+  try {
+    const response = await request<Record<string, any>>('/auth/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    console.log('[OTP Send] ✓ Success:', response);
+    return response;
+  } catch (error) {
+    console.error('[OTP Send] ✗ Failed:', error);
+    throw error;
+  }
+};
+
+export const verifyOtp = async (email: string, otp: string) => {
+  console.log('[OTP Verify] Starting for email:', email, 'OTP length:', otp.length);
+  try {
+    const response = await request<Record<string, any>>('/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp }),
+    });
+    console.log('[OTP Verify] ✓ Success:', response);
+    return response;
+  } catch (error) {
+    console.error('[OTP Verify] ✗ Failed:', error);
+    throw error;
+  }
+};
 
 export const fetchMessages = () => request<Message[]>('/messages');
 export const createMessage = (message: Omit<Message, 'id'> & { id?: string }) =>
