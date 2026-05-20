@@ -41,7 +41,7 @@ function loadData(filePath){
 }
 
 function saveData(filePath, data){
-  // If FIRESTORE is enabled, attempt to persist using repository functions (best-effort, async)
+  // If FIRESTORE is enabled, persist only to Firestore (no JSON fallbacks).
   if (process.env.USE_FIRESTORE === 'true') {
     (async () => {
       try {
@@ -51,11 +51,13 @@ function saveData(filePath, data){
         else if (filePath === MESSAGES_FILE) await messagesRepo.setAllMessages(data);
         else if (filePath === ACTIVITY_FILE) await activityRepo.setAllActivityLogs(data);
         else if (filePath === OTPS_FILE) await otpsRepo.setAllOtps(data);
-        else if (filePath === NOTIFICATIONS_FILE) await notificationsRepo.setAllNotifications ? await notificationsRepo.setAllNotifications(data) : await notificationsRepo.createNotification(data);
-        else fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        else if (typeof NOTIFICATIONS_FILE !== 'undefined' && filePath === NOTIFICATIONS_FILE) {
+          await (notificationsRepo.setAllNotifications ? notificationsRepo.setAllNotifications(data) : notificationsRepo.createNotification(data));
+        } else {
+          console.warn('[saveData] USE_FIRESTORE=true but no Firestore mapping for file:', filePath);
+        }
       } catch (e) {
-        console.error('[saveData] Failed to persist to Firestore, falling back to filesystem:', e && e.message ? e.message : e);
-        try { fs.writeFileSync(filePath, JSON.stringify(data, null, 2)); } catch (fsErr) { console.error('[saveData] filesystem write failed:', fsErr && fsErr.message ? fsErr.message : fsErr); }
+        console.error('[saveData] Failed to persist to Firestore:', e && e.message ? e.message : e);
       }
     })();
     return;
@@ -1185,14 +1187,15 @@ async function loadFromFirestore() {
 
     console.log('[Firestore] Data loaded from Firestore');
   } catch (e) {
-    console.error('[Firestore] Failed to load data - falling back to local files', e && e.message ? e.message : e);
-    users = loadData(USERS_FILE);
-    products = loadData(PRODUCTS_FILE);
-    orders = loadData(ORDERS_FILE);
-    messages = loadData(MESSAGES_FILE).map(normalizeMessage);
-    activityLogs = loadData(ACTIVITY_FILE);
-    notifications = loadNotifications();
-    otps = loadOtps();
+    console.error('[Firestore] Failed to load data - not falling back to local files (USE_FIRESTORE=true):', e && e.message ? e.message : e);
+    // Do not fall back to JSON files when Firestore mode is required.
+    users = [];
+    products = [];
+    orders = [];
+    messages = [];
+    activityLogs = [];
+    notifications = [];
+    otps = [];
   }
 }
 
