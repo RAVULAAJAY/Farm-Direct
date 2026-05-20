@@ -9,3 +9,10 @@ package-lock.json
 # Environment variables
 .env
 .env.local
+
+# Ignore any locally stored Firebase service account JSON
+firebase/serviceAccountKey.json
+# prefer config path for service account
+config/serviceAccountKey.json
+# Also ensure any stray serviceAccountKey.json is ignored
+serviceAccountKey.json

@@ -40,3 +40,10 @@ logs/
 
 # Documentation (deployment docs, setup guides)
 99-docs/
+
+# Explicit sensitive files
+/backend/config/serviceAccountKey.json
+/backend/.env
+/backend/email-debug.log
+/backend/server_out.log
+/backend/server_err.log

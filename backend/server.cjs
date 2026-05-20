@@ -1,13 +1,21 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const brevoSendOtp = require('./sendOtpEmail');
 const emailService = require('./services/emailService');
+const usersRepo = require('./repositories/usersRepository');
+const productsRepo = require('./repositories/productsRepository');
+const ordersRepo = require('./repositories/ordersRepository');
+const messagesRepo = require('./repositories/messagesRepository');
+const notificationsRepo = require('./repositories/notificationsRepository');
+const reviewsRepo = require('./repositories/reviewsRepository');
+const activityRepo = require('./repositories/activityRepository');
+const otpsRepo = require('./repositories/otpsRepository');
 
 // All transactional emails use Brevo via `emailService`.
 function getFromAddress() {
@@ -27,11 +35,32 @@ function ensureDataDir(){
 }
 
 function loadData(filePath){
+  // legacy file fallback for local development
   if (!fs.existsSync(filePath)) return [];
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8') || '[]'); } catch { return []; }
 }
 
 function saveData(filePath, data){
+  // If FIRESTORE is enabled, attempt to persist using repository functions (best-effort, async)
+  if (process.env.USE_FIRESTORE === 'true') {
+    (async () => {
+      try {
+        if (filePath === USERS_FILE) await usersRepo.setAllUsers(data);
+        else if (filePath === PRODUCTS_FILE) await productsRepo.setAllProducts(data);
+        else if (filePath === ORDERS_FILE) await ordersRepo.setAllOrders(data);
+        else if (filePath === MESSAGES_FILE) await messagesRepo.setAllMessages(data);
+        else if (filePath === ACTIVITY_FILE) await activityRepo.setAllActivityLogs(data);
+        else if (filePath === OTPS_FILE) await otpsRepo.setAllOtps(data);
+        else if (filePath === NOTIFICATIONS_FILE) await notificationsRepo.setAllNotifications ? await notificationsRepo.setAllNotifications(data) : await notificationsRepo.createNotification(data);
+        else fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+      } catch (e) {
+        console.error('[saveData] Failed to persist to Firestore, falling back to filesystem:', e && e.message ? e.message : e);
+        try { fs.writeFileSync(filePath, JSON.stringify(data, null, 2)); } catch (fsErr) { console.error('[saveData] filesystem write failed:', fsErr && fsErr.message ? fsErr.message : fsErr); }
+      }
+    })();
+    return;
+  }
+
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
@@ -51,11 +80,14 @@ function normalizeMessage(message) {
 
 ensureDataDir();
 
-let users = loadData(USERS_FILE);
-let products = loadData(PRODUCTS_FILE);
-let orders = loadData(ORDERS_FILE);
-let messages = loadData(MESSAGES_FILE).map(normalizeMessage);
-let activityLogs = loadData(ACTIVITY_FILE);
+// in-memory state (will be populated from Firestore when enabled)
+let users = [];
+let products = [];
+let orders = [];
+let messages = [];
+let activityLogs = [];
+let notifications = [];
+let otps = [];
 
 // Environment / config
 const PORT = process.env.PORT || 4000;
@@ -199,19 +231,7 @@ async function sendOrderStatusEmailToBuyer(order) {
 }
 
 
-if (users.length === 0) {
-  users.push({
-    id: 'admin_primary',
-    name: 'Platform Admin',
-    email: 'admin@platform.local',
-    role: 'admin',
-    location: 'HQ',
-    phone: '',
-    isActive: true,
-    joinedDate: new Date().toISOString(),
-  });
-  saveData(USERS_FILE, users);
-}
+// When FIRESTORE is enabled the initial admin user will be ensured during startup load.
 
 const app = express();
 const allowedOrigins = [
@@ -254,11 +274,9 @@ function loadNotifications() {
   return loadData(NOTIFICATIONS_FILE);
 }
 function saveNotifications(data){ saveData(NOTIFICATIONS_FILE, data); }
-let notifications = loadNotifications();
-
+// NOTE: `notifications` and `otps` are declared earlier as in-memory arrays
 function loadOtps(){ return loadData(OTPS_FILE); }
 function saveOtps(data){ saveData(OTPS_FILE, data); }
-let otps = loadOtps();
 
 app.get('/api/users', (req, res) => res.json(users));
 app.post('/api/users', (req, res) => {
@@ -1127,6 +1145,58 @@ app.get('/api/debug/otp-config', (req, res) => {
   });
 });
 
+async function loadFromFirestore() {
+  // If USE_FIRESTORE is not enabled, keep legacy local JSON behaviour
+  if (process.env.USE_FIRESTORE !== 'true') {
+    users = loadData(USERS_FILE);
+    products = loadData(PRODUCTS_FILE);
+    orders = loadData(ORDERS_FILE);
+    messages = loadData(MESSAGES_FILE).map(normalizeMessage);
+    activityLogs = loadData(ACTIVITY_FILE);
+    notifications = loadNotifications();
+    otps = loadOtps();
+    return;
+  }
+
+  try {
+    // Load collections from Firestore
+    users = await usersRepo.getAllUsers();
+    if (!Array.isArray(users) || users.length === 0) {
+      const adminUser = {
+        id: 'admin_primary',
+        name: 'Platform Admin',
+        email: 'admin@platform.local',
+        role: 'admin',
+        location: 'HQ',
+        phone: '',
+        isActive: true,
+        joinedDate: new Date().toISOString(),
+      };
+      users = [adminUser];
+      try { await usersRepo.setAllUsers(users); } catch (e) { console.warn('[Firestore] failed to ensure admin user', e && e.message ? e.message : e); }
+    }
+
+    products = await productsRepo.getAllProducts();
+    orders = await ordersRepo.getAllOrders();
+    messages = (await messagesRepo.getAllMessages()).map(normalizeMessage);
+    activityLogs = await activityRepo.getAllActivityLogs();
+    notifications = await notificationsRepo.getAllNotifications();
+    otps = await otpsRepo.getAllOtps();
+
+    console.log('[Firestore] Data loaded from Firestore');
+  } catch (e) {
+    console.error('[Firestore] Failed to load data - falling back to local files', e && e.message ? e.message : e);
+    users = loadData(USERS_FILE);
+    products = loadData(PRODUCTS_FILE);
+    orders = loadData(ORDERS_FILE);
+    messages = loadData(MESSAGES_FILE).map(normalizeMessage);
+    activityLogs = loadData(ACTIVITY_FILE);
+    notifications = loadNotifications();
+    otps = loadOtps();
+  }
+}
+
 (async () => {
-  server.listen(listenTarget, listenHost, () => console.log(`API server running on ${listenHost}:${listenTarget}`));
+  await loadFromFirestore();
+  server.listen(listenTarget, listenHost, () => console.log(`Server running on port ${listenTarget}`));
 })();
