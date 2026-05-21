@@ -1,4 +1,4 @@
-const { db } = require('../config/firebase');
+const { db, admin } = require('../config/firebase');
 const { serializeData, setCollectionFromArray, listCollection, sanitizeFirestoreData } = require('../services/firebaseService');
 const bcrypt = require('bcrypt');
 
@@ -8,6 +8,15 @@ function normalizeEmail(email) {
 
 function _log(op, collection, details) {
   try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch(e){}
+}
+
+function getSortTimestamp(user) {
+  const candidates = [user?.updatedAt, user?.createdAt, user?.joinedDate];
+  for (const candidate of candidates) {
+    const parsed = Date.parse(candidate);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return 0;
 }
 
 async function getAllUsers() {
@@ -33,6 +42,9 @@ async function createUser(user) {
   const data = sanitizeFirestoreData({ ...(user || {}) });
   data.email = normalizeEmail(data.email);
   delete data.id;
+  delete data.hashedPassword;
+  delete data.passwordHash;
+  delete data.passwordSalt;
 
   if (data.password) {
     try {
@@ -61,6 +73,12 @@ async function updateUser(id, updates) {
   if (Object.prototype.hasOwnProperty.call(nextUpdates, 'email')) {
     nextUpdates.email = normalizeEmail(nextUpdates.email);
   }
+  const authCleanupFields = ['hashedPassword', 'passwordHash', 'passwordSalt', 'resetPasswordHash', 'resetPasswordExpiry'];
+  for (const field of authCleanupFields) {
+    if (nextUpdates[field] === null) {
+      nextUpdates[field] = admin.firestore.FieldValue.delete();
+    }
+  }
   const docRef = db.collection('users').doc(String(id));
   try {
     await docRef.set(nextUpdates, { merge: true });
@@ -82,12 +100,15 @@ async function findByEmail(email) {
   if (snap.empty) return null;
 
   const candidates = snap.docs.map((doc) => ({ id: doc.id, ...serializeData(doc.data()) }));
-  const preferred = candidates.find((candidate) => {
-    const hasBcryptPassword = typeof candidate.password === 'string' && candidate.password.startsWith('$2');
-    const hasPlainPassword = typeof candidate.password === 'string' && candidate.password.length > 0 && !candidate.password.startsWith('$2');
-    const hasLegacyScrypt = typeof candidate.passwordHash === 'string' && typeof candidate.passwordSalt === 'string';
-    return hasBcryptPassword || hasPlainPassword || hasLegacyScrypt;
-  }) || candidates[0];
+  const preferred = candidates
+    .slice()
+    .sort((left, right) => getSortTimestamp(right) - getSortTimestamp(left))
+    .find((candidate) => {
+      const hasBcryptPassword = typeof candidate.password === 'string' && candidate.password.startsWith('$2');
+      const hasPlainPassword = typeof candidate.password === 'string' && candidate.password.length > 0 && !candidate.password.startsWith('$2');
+      const hasLegacyScrypt = typeof candidate.passwordHash === 'string' && typeof candidate.passwordSalt === 'string';
+      return hasBcryptPassword || hasPlainPassword || hasLegacyScrypt;
+    }) || candidates.slice().sort((left, right) => getSortTimestamp(right) - getSortTimestamp(left))[0];
 
   if (candidates.length > 1) {
     console.warn(`[Firestore] Duplicate email records found for ${normalizedEmail}: ${candidates.length}. Using ${preferred.id}`);

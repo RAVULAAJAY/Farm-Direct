@@ -441,6 +441,15 @@ async function handleVerifyOtp(req, res) {
   }
 }
 
+function sendJsonError(res, status, message, details) {
+  return res.status(status).json({
+    success: false,
+    error: message,
+    message,
+    ...(details ? { details } : {}),
+  });
+}
+
 app.post(['/api/auth/login', '/login'], handleLogin);
 app.post(['/api/auth/signup', '/signup'], handleSignup);
 app.post(['/api/auth/send-otp', '/send-otp'], handleSendOtp);
@@ -485,9 +494,15 @@ app.post('/api/auth/reset', async (req, res) => {
     const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
     if (tokenHash !== user.resetPasswordHash) return res.status(400).json({ error: 'Invalid token' });
 
-    const salt = crypto.randomBytes(16).toString('hex');
-    const derived = (await scryptAsync(String(password), salt, 64)).toString('hex');
-    await usersRepo.updateUser(user.id, { passwordSalt: salt, passwordHash: derived, resetPasswordHash: null, resetPasswordExpiry: null });
+    const bcryptHash = await bcrypt.hash(String(password), 10);
+    await usersRepo.updateUser(user.id, {
+      password: bcryptHash,
+      passwordHash: null,
+      passwordSalt: null,
+      hashedPassword: null,
+      resetPasswordHash: null,
+      resetPasswordExpiry: null,
+    });
     try { await activityRepo.addActivityLog({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'reset password', targetType: 'auth', timestamp: new Date().toISOString() }); } catch (e) { console.warn('Failed to log password reset activity', e && e.message ? e.message : e); }
 
     return res.json({ success: true });
@@ -784,7 +799,7 @@ const server = http.createServer(app);
 let io;
 try {
   const { Server } = require('socket.io');
-  io = new Server(server, { cors: { origin: '*' } });
+  io = new Server(server, { cors: { origin: allowedOrigin, methods: ['GET', 'POST'], credentials: true } });
 
   io.on('connection', (socket) => {
     socket.on('join', (data) => {
@@ -819,8 +834,6 @@ try {
 } catch (e) {
   console.warn('Socket.IO not available', e && e.message ? e.message : e);
 }
-
-app.use((_,res)=>res.status(404).json({error:'Not found'}));
 const listenTarget = PORT || 4000;
 const listenHost = process.env.HOST || '0.0.0.0';
 
@@ -834,6 +847,19 @@ app.get('/api/debug/otp-config', (req, res) => {
     frontendUrl: process.env.FRONTEND_URL || '✗ missing',
   });
 });
+
+app.use((err, req, res, next) => {
+  console.error('[API] Unhandled error:', err && err.stack ? err.stack : err);
+  if (res.headersSent) return next(err);
+
+  if (err && err.type === 'entity.too.large') {
+    return sendJsonError(res, 400, 'Request body too large');
+  }
+
+  return sendJsonError(res, 500, 'Internal server error');
+});
+
+app.use((_, res) => res.status(404).json({ success: false, error: 'Not found', message: 'Route not found' }));
 
 async function loadFromFirestore() {
   // Enforce Firestore as the single source of truth.
