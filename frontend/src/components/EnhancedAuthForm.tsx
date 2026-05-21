@@ -161,7 +161,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
   };
 
   const handleSendOtp = async () => {
-    const email = formData.email?.trim();
+    const email = String(formData.email || '').trim().toLowerCase();
     if (!email) {
       console.error('[OTP] Email is required');
       setFieldError('email', 'Email is required');
@@ -202,7 +202,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
   };
 
   const handleVerifyOtp = async () => {
-    const email = formData.email?.trim();
+    const email = String(formData.email || '').trim().toLowerCase();
     if (!email) {
       console.error('[OTP Verify] Email is required');
       setFieldError('email', 'Email is required');
@@ -543,35 +543,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
       return;
     }
 
-    if (role === 'admin') {
-      if (!hasAdminLoginCredentials()) {
-        setGeneralError('Admin access is not configured on this device.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (!isAdminCredentialMatch(formData.email, formData.password)) {
-        setGeneralError('Invalid admin credentials.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const adminUser: User = {
-        id: 'admin_primary',
-        name: 'Platform Admin',
-        email: getAdminLoginEmail(),
-        phone: '',
-        location: 'HQ',
-        role: 'admin',
-        isActive: true,
-        loginCount: 1,
-        createdAt: new Date().toISOString(),
-      };
-
-      onSuccess(adminUser);
-      setIsSubmitting(false);
-      return;
-    }
+    // Admin authenticates via backend like other roles
 
     try {
       const validationResult =
@@ -657,7 +629,7 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
         }
       }
 
-      const normalizedEmail = formData.email.trim().toLowerCase();
+      const normalizedEmail = String(formData.email || '').trim().toLowerCase();
       let existingUser: User | undefined;
 
       if (submitMode === 'login') {
@@ -1213,16 +1185,16 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
                               onChange={handleFarmerPhotoUpload}
                             />
                           </label>
-                              <Button type="button" variant="outline" className="gap-2" onClick={openLiveCamera} disabled={isCameraStarting}>
-                                <Camera className="h-4 w-4" />
-                                {isCameraStarting ? 'Opening Camera...' : 'Take Live Photo'}
-                              </Button>
+                          <Button type="button" variant="outline" className="gap-2" onClick={openLiveCamera} disabled={isCameraStarting}>
+                            <Camera className="h-4 w-4" />
+                            {isCameraStarting ? 'Opening Camera...' : 'Take Live Photo'}
+                          </Button>
                         </div>
                         <p className="text-sm text-gray-600">
                           {farmerPhotoName || 'Choose an existing photo or capture a live photo.'}
                         </p>
                         {fieldErrors.profilePhoto && <p className="text-sm text-red-600">{fieldErrors.profilePhoto}</p>}
-                            {cameraError && <p className="text-sm text-red-600">{cameraError}</p>}
+                        {cameraError && <p className="text-sm text-red-600">{cameraError}</p>}
                       </div>
                     </div>
 

@@ -1,5 +1,6 @@
 const { db } = require('../config/firebase');
 const { serializeData, setCollectionFromArray, listCollection, sanitizeFirestoreData } = require('../services/firebaseService');
+const bcrypt = require('bcrypt');
 
 function normalizeEmail(email) {
   return String(email || '').toLowerCase().trim();
@@ -32,6 +33,16 @@ async function createUser(user) {
   const data = sanitizeFirestoreData({ ...(user || {}) });
   data.email = normalizeEmail(data.email);
   delete data.id;
+
+  if (data.password) {
+    try {
+      data.password = await bcrypt.hash(data.password, 10);
+    } catch (error) {
+      console.error('[Auth] Password hashing failed:', error.message);
+      throw new Error('Failed to hash password');
+    }
+  }
+
   try {
     await coll.doc(id).set(data);
     const doc = await coll.doc(id).get();

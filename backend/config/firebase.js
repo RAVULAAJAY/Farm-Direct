@@ -18,55 +18,62 @@ function hasValidKey(k) {
   return typeof k === 'string' && k.indexOf('-----BEGIN PRIVATE KEY-----') !== -1;
 }
 
-function logMissingEnv(context, requiredKeys) {
-  const missing = requiredKeys.filter((key) => !String(process.env[key] || '').trim());
-  if (missing.length > 0) {
-    console.warn(`[Startup] Missing ${context} env vars: ${missing.join(', ')}`);
+const requiredEnvVars = [
+  'FIREBASE_PROJECT_ID',
+  'FIREBASE_CLIENT_EMAIL',
+  'FIREBASE_PRIVATE_KEY'
+];
+
+// Validate required environment variables
+requiredEnvVars.forEach((key) => {
+  if (!process.env[key]) {
+    console.error(`[Firebase] Missing environment variable: ${key}`);
   }
-  return missing;
+});
+const missingEnv = requiredEnvVars.filter((k) => !process.env[k]);
+if (missingEnv.length > 0) {
+  const msg = `[Firebase] Missing required env vars: ${missingEnv.join(', ')}`;
+  if ((process.env.NODE_ENV || '').toLowerCase() === 'production') {
+    console.error(msg);
+    throw new Error(msg);
+  } else {
+    console.warn(msg);
+  }
 }
 
-logMissingEnv('Firebase', ['FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY']);
-
 try {
-  // Prefer env-based credentials when present
-  if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY && hasValidKey(FIREBASE_PRIVATE_KEY)) {
-    const privateKey = FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({ projectId: FIREBASE_PROJECT_ID, clientEmail: FIREBASE_CLIENT_EMAIL, privateKey }),
-        storageBucket: FIREBASE_STORAGE_BUCKET || undefined,
-      });
-    }
-    firebaseAdmin = admin;
-    db = admin.firestore();
-    bucket = FIREBASE_STORAGE_BUCKET ? admin.storage().bucket(FIREBASE_STORAGE_BUCKET) : admin.storage().bucket();
-    console.log('✅ Firebase connected (env)');
-  } else {
-    // Fallback to serviceAccountKey.json in this config folder
-    const saPath = path.join(__dirname, 'serviceAccountKey.json');
-    if (fs.existsSync(saPath)) {
-      const sa = require(saPath);
-      if (sa && hasValidKey(sa.private_key)) {
-        if (!admin.apps.length) {
-          admin.initializeApp({
-            credential: admin.credential.cert(sa),
-            storageBucket: sa.project_id ? `${sa.project_id}.appspot.com` : undefined,
-          });
+  if (!admin.apps.length) {
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    const credentials = process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && privateKey
+      ? {
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey
         }
-        firebaseAdmin = admin;
-        db = admin.firestore();
-        bucket = admin.storage().bucket(sa.project_id ? `${sa.project_id}.appspot.com` : undefined);
-        console.log('✅ Firebase connected (serviceAccountKey.json)');
-      } else {
-        console.error('❌ Firebase connection failed - serviceAccountKey.json is present but invalid (missing private_key)');
-      }
-    } else {
-      console.error('❌ Firebase connection failed - no env credentials and no serviceAccountKey.json found');
-    }
+      : require(path.join(__dirname, 'serviceAccountKey.json'));
+
+    admin.initializeApp({
+      credential: admin.credential.cert(credentials),
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${credentials.projectId}.appspot.com`
+    });
+
+    console.log('[Firebase] Initialized successfully');
+  } else {
+    console.log('[Firebase] Already initialized');
   }
-} catch (e) {
-  console.error('❌ Firebase connection failed', e && e.message ? e.message : e);
+
+  firebaseAdmin = admin;
+  db = admin.firestore();
+  bucket = admin.storage().bucket();
+  console.log('[Firebase] Firestore connected');
+  console.log('[Firebase] Storage connected');
+} catch (error) {
+  console.error(`[Firebase] Initialization error: ${error && error.stack ? error.stack : error}`);
+  // In production we must not continue without a working Firebase connection
+  if ((process.env.NODE_ENV || '').toLowerCase() === 'production') {
+    throw error;
+  }
+  throw error;
 }
 
 module.exports = { admin: firebaseAdmin, db, bucket };

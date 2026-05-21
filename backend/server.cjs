@@ -2,6 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
+const bcrypt = require('bcrypt');
 const cors = require('cors');
 // Note: local filesystem persistence removed — Firestore is the single source of truth.
 const crypto = require('crypto');
@@ -32,7 +33,7 @@ function sanitizeForLog(value) {
 }
 
 function validateStartupEnv() {
-  const checks = [
+  const required = [
     'JWT_SECRET',
     'FIREBASE_PROJECT_ID',
     'FIREBASE_CLIENT_EMAIL',
@@ -41,9 +42,14 @@ function validateStartupEnv() {
     'BREVO_SMTP_PASS',
     'FRONTEND_URL',
   ];
-  const missing = checks.filter((key) => !String(process.env[key] || '').trim());
+  const missing = required.filter((key) => !String(process.env[key] || '').trim());
   if (missing.length > 0) {
-    console.warn('[Startup] Missing production env vars:', missing.join(', '));
+    const msg = `[Startup] Missing required env vars: ${missing.join(', ')}`;
+    console.error(msg);
+    if ((process.env.NODE_ENV || '').toLowerCase() === 'production') {
+      console.error('[Startup] Aborting startup due to missing env vars');
+      process.exit(1);
+    }
   } else {
     console.log('[Startup] All required production env vars present');
   }
@@ -255,490 +261,107 @@ async function sendOrderStatusEmailToBuyer(order) {
 // When FIRESTORE is enabled the initial admin user will be ensured during startup load.
 
 const app = express();
-const allowedOrigins = [
-  process.env.CORS_ORIGIN,
-  process.env.FRONTEND_URL,
-].filter(Boolean);
+app.use(express.json());
 
-console.log('[CORS] Configured allowed origins:', allowedOrigins);
-
-app.use(cors({
-  origin: function(origin, callback) {
-    // allow requests with no origin (like mobile apps, curl, etc.)
-    if (!origin) {
-      console.log('[CORS] ✓ Request allowed (no origin header)');
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.includes(origin)) {
-      console.log(`[CORS] ✓ Origin allowed (in list): ${origin}`);
-      return callback(null, true);
-    }
-    
-    if (origin.endsWith('.vercel.app')) {
-      console.log(`[CORS] ✓ Origin allowed (*.vercel.app): ${origin}`);
-      return callback(null, true);
-    }
-    
-    console.warn(`[CORS] ✗ Origin REJECTED: ${origin}`);
-    return callback(new Error('CORS not allowed from this origin: ' + origin), false);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-}));
-app.use(express.json({ limit: '10mb' }));
-
-// Notifications persistence is handled via `notificationsRepository`.
-// OTPs are ephemeral and stored only in memory (see otpStore helpers).
-
-app.get('/api/users', async (req, res) => {
-  try {
-    const all = await usersRepo.getAllUsers();
-    const safe = all.map(u => {
-      const s = { ...u };
-      delete s.passwordHash; delete s.passwordSalt; delete s.resetPasswordHash; delete s.resetPasswordExpiry;
-      return s;
-    });
-    return res.json(safe);
-  } catch (e) {
-    console.error('[API] Failed to fetch users', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to fetch users' });
-  }
-});
-
-const signupHandler = async (req, res) => {
-  try {
-    console.log('REQ BODY', req.body);
-    console.log('[Auth] SIGNUP START');
-    const incoming = { ...req.body };
-    const rawEmail = incoming.email;
-    const normalizedEmail = normalizeEmail(rawEmail);
-    if (rawEmail && normalizedEmail !== String(rawEmail).trim()) {
-      console.warn('[Auth] Email normalization adjusted the input email:', { rawEmail, normalizedEmail });
-    }
-
-    const requiredFields = ['name', 'email', 'password', 'role'];
-    const missingFields = requiredFields.filter((field) => !String(incoming[field] || '').trim());
-    if (missingFields.length > 0) {
-      console.warn('[Auth] SIGNUP VALIDATION FAILED:', sanitizeForLog({ missingFields, payload: incoming }));
-      return res.status(400).json({ success: false, message: 'Unable to create user', error: `Missing required fields: ${missingFields.join(', ')}` });
-    }
-
-    if (!['buyer', 'farmer', 'admin'].includes(String(incoming.role).toLowerCase())) {
-      console.warn('[Auth] SIGNUP VALIDATION FAILED: invalid role', sanitizeForLog({ role: incoming.role }));
-      return res.status(400).json({ success: false, message: 'Unable to create user', error: 'Invalid role' });
-    }
-
-    incoming.email = normalizedEmail;
-    const plainPassword = typeof incoming.password === 'string' ? incoming.password : undefined;
-    delete incoming.password;
-
-    const user = { id: uuidv4(), ...incoming, isActive: true, joinedDate: new Date().toISOString() };
-    if (plainPassword) {
-      const salt = crypto.randomBytes(16).toString('hex');
-      const derived = (await scryptAsync(plainPassword, salt, 64)).toString('hex');
-      user.passwordSalt = salt;
-      user.passwordHash = derived;
-    }
-
-    console.log('[Firestore] WRITE - users/signup');
-    const created = await usersRepo.createUser(user);
-    if (!created || !created.id) {
-      throw new Error('Firestore returned an empty user document after createUser');
-    }
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: created.id, userName: created.name, userRole: created.role, action: 'registered account', timestamp: new Date().toISOString() });
-
-    const safe = { ...created };
-    delete safe.passwordHash; delete safe.passwordSalt; delete safe.resetPasswordHash; delete safe.resetPasswordExpiry;
-    const token = createAuthToken(safe);
-    res.status(201).json({ success: true, user: safe, token });
-    console.log('[Auth] SIGNUP SUCCESS', { userId: safe.id, email: safe.email });
-
-    try {
-      await emailService.sendAccountCreatedEmail(created);
-      console.log('[Brevo] ACCOUNT CREATED EMAIL SENT', created.email);
-    } catch (mailError) {
-      console.error('[Brevo] EMAIL ERROR:', mailError && mailError.message ? mailError.message : mailError);
-    }
-  } catch (e) {
-    console.error('[Auth] SIGNUP ERROR:', e);
-    console.error('[Auth] SIGNUP FAILED', e && e.message ? e.message : e);
-    res.status(500).json({ success: false, message: 'Unable to create user', error: e && e.message ? e.message : String(e) });
-  }
-};
-
-app.post('/api/users', signupHandler);
-app.post('/api/auth/signup', signupHandler);
-
-// legacy OTP persistence removed; using ephemeral in-memory OTP store (see storeOtp/getOtpEntry)
-
-async function sendOtpEmail(req, res, { resend = false } = {}) {
-  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
-  if (!email) {
-    console.error('[OTP SEND] Email missing in request body');
-    return res.status(400).json({ error: 'Email is required' });
-  }
-
-  cleanupExpiredOtps();
-  console.log(`[OTP SEND] ${resend ? 'Resend' : 'Send'} request received for email: ${email}`);
-
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
-  const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
-  const expiresAt = Date.now() + (5 * 60 * 1000);
-
-  // Store OTP only in-memory (ephemeral)
-  storeOtp(email, otpHash, expiresAt);
-  console.log(`[OTP SEND] ✓ OTP stored in-memory for ${email}, expires at: ${new Date(expiresAt).toISOString()}`);
-  // Prefer Brevo API for OTP sends
-  if (process.env.BREVO_API_KEY && typeof brevoSendOtp === 'function') {
-    try {
-      console.log('[OTP SEND] Sending OTP via Brevo API');
-      await brevoSendOtp(email, otp);
-      return res.json({ success: true, message: resend ? 'OTP resent to your email' : 'OTP sent to your email', resend });
-    } catch (brevoErr) {
-      console.error('[OTP SEND] Brevo send failed:', brevoErr && brevoErr.message ? brevoErr.message : brevoErr);
-      const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-      if ((process.env.NODE_ENV || 'development') !== 'production' && process.env.DEBUG_OTP === 'true') {
-        console.log(`[OTP SEND] Development fallback OTP for ${email}: ${otp}`);
-        return res.json({ success: true, message: 'OTP generated (Brevo send failed)', debugOtp, resend });
-      }
-      return res.status(502).json({ error: 'Failed to send OTP via Brevo', message: 'Please try again later', debugOtp, timestamp: new Date().toISOString() });
-    }
-  }
-
-  // No Brevo configured: development-only debug fallback, otherwise error
-  const debugOtp = process.env.DEBUG_OTP === 'true' ? otp : undefined;
-  if ((process.env.NODE_ENV || 'development') !== 'production' && process.env.DEBUG_OTP === 'true') {
-    console.log(`[OTP SEND] Development fallback OTP for ${email}: ${otp}`);
-    return res.json({ success: true, message: 'OTP generated (Brevo not configured)', debugOtp, resend });
-  }
-
-  return res.status(503).json({
-    error: 'Email service unavailable',
-    message: 'OTP could not be sent because Brevo is not configured',
-    debugOtp,
-    timestamp: new Date().toISOString(),
-  });
-}
-
-// Send OTP to an email for verification (used during signup)
-app.post('/api/auth/send-otp', async (req, res) => sendOtpEmail(req, res, { resend: false }));
-app.post('/api/auth/resend-otp', async (req, res) => sendOtpEmail(req, res, { resend: true }));
-
-// Verify OTP
-app.post('/api/auth/verify-otp', (req, res) => {
-  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
-  const otp = String((req.body && req.body.otp) || '').trim();
-
-  console.log(`[OTP VERIFY] Request received for email: ${email}, OTP length: ${otp.length}`);
-
-  if (!email || !otp) {
-    console.error('[OTP VERIFY] ✗ Missing email or OTP');
-    return res.status(400).json({ error: 'Email and OTP are required' });
-  }
-
-  const entry = getOtpEntry(email);
-  if (!entry) {
-    console.warn(`[OTP VERIFY] ✗ No OTP found for email: ${email}`);
-    return res.status(400).json({ error: 'OTP not found or expired' });
-  }
-
-  const now = Date.now();
-  const expiresAt = Number(entry.expiresAt);
-  if (now > expiresAt) {
-    const expiredSeconds = Math.floor((now - expiresAt) / 1000);
-    console.warn(`[OTP VERIFY] ✗ OTP expired for ${email} (${expiredSeconds}s ago)`);
-    deleteOtpEntry(email);
-    return res.status(400).json({ error: 'OTP expired' });
-  }
-
-  const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
-  if (otpHash !== entry.otpHash) {
-    console.warn(`[OTP VERIFY] ✗ Invalid OTP for ${email} (hash mismatch)`);
-    return res.status(400).json({ error: 'Invalid OTP' });
-  }
-
-  // Valid - remove entry
-  deleteOtpEntry(email);
-  console.log(`[OTP VERIFY] ✓ Email verified successfully for: ${email}`);
-  res.json({ success: true, message: 'Email verified successfully' });
-});
-app.put('/api/users/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const existing = await usersRepo.getUserById(id);
-    if (!existing) return res.status(404).json({ error: 'User not found' });
-
-    const updates = { ...req.body };
-    if (typeof updates.email === 'string') {
-      updates.email = normalizeEmail(updates.email);
-    }
-    if (typeof updates.password === 'string' && updates.password.length > 0) {
-      if (!updates.oldPassword) return res.status(400).json({ error: 'Current password required to change password' });
-      try {
-        const oldDerived = (await scryptAsync(String(updates.oldPassword), existing.passwordSalt || '', 64)).toString('hex');
-        if (oldDerived !== existing.passwordHash) return res.status(401).json({ error: 'Current password is incorrect' });
-      } catch (e) { return res.status(500).json({ error: 'Unable to verify password' }); }
-
-      const salt = crypto.randomBytes(16).toString('hex');
-      const derived = (await scryptAsync(updates.password, salt, 64)).toString('hex');
-      updates.passwordSalt = salt;
-      updates.passwordHash = derived;
-      delete updates.password;
-      delete updates.oldPassword;
-    }
-
-    const updated = await usersRepo.updateUser(id, updates);
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: updated.id, userName: updated.name, userRole: updated.role, action: 'updated profile', timestamp: new Date().toISOString() });
-
-    const safe = { ...updated };
-    delete safe.passwordHash; delete safe.passwordSalt; delete safe.resetPasswordHash; delete safe.resetPasswordExpiry;
-    res.json(safe);
-  } catch (e) {
-    console.error('[API] Failed to update user', e && e.message ? e.message : e);
-    res.status(500).json({ error: 'Unable to update user' });
-  }
-});
-
-app.get('/api/products', async (req, res) => {
-  try {
-    const list = await productsRepo.getAllProducts();
-    return res.json(list);
-  } catch (e) {
-    console.error('[API] Failed to fetch products', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to fetch products' });
-  }
-});
-
-app.post('/api/products', async (req, res) => {
-  try {
-    const product = { id: uuidv4(), ...req.body };
-    const created = await productsRepo.createProduct(product);
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: created.farmerId, userName: created.farmerName, userRole: 'farmer', action: 'uploaded product', targetId: created.id, targetType: 'product', timestamp: new Date().toISOString() });
-    res.status(201).json(created);
-  } catch (e) {
-    console.error('[API] Failed to create product', e && e.message ? e.message : e);
-    res.status(500).json({ error: 'Unable to create product' });
-  }
-});
-
-app.put('/api/products/:id', async (req, res) => {
-  try {
-    const existing = await productsRepo.getProductById(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Product not found' });
-    const updated = await productsRepo.updateProduct(req.params.id, req.body);
-    res.json(updated);
-  } catch (e) {
-    console.error('[API] Failed to update product', e && e.message ? e.message : e);
-    res.status(500).json({ error: 'Unable to update product' });
-  }
-});
-
-app.post('/api/products/:id/reviews', async (req, res) => {
-  try {
-    const productId = req.params.id;
-    const reviewPayload = {
-      userId: req.body.userId,
-      userName: req.body.userName,
-      rating: Number(req.body.rating) || 0,
-      title: req.body.title || 'Buyer review',
-      content: req.body.content || '',
-      verified: req.body.verified ?? true,
-      helpful: Number(req.body.helpful) || 0,
-      notHelpful: Number(req.body.notHelpful) || 0,
-      images: Array.isArray(req.body.images) ? req.body.images : [],
-      purchaseVerified: req.body.purchaseVerified ?? true,
-    };
-
-    await reviewsRepo.addReview(productId, reviewPayload);
-    const updatedProduct = await productsRepo.getProductById(productId);
-    return res.status(201).json(updatedProduct);
-  } catch (e) {
-    console.error('[API] Failed to add review', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to add review' });
-  }
-});
-app.delete('/api/products/:id', async (req, res) => {
-  try {
-    const existing = await productsRepo.getProductById(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Product not found' });
-    await productsRepo.deleteProduct(req.params.id);
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: existing.farmerId, userName: existing.farmerName, userRole: 'farmer', action: 'deleted product', targetId: existing.id, targetType: 'product', timestamp: new Date().toISOString() });
-    return res.json({ success: true });
-  } catch (e) {
-    console.error('[API] Failed to delete product', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to delete product' });
-  }
-});
-
-app.get('/api/orders', async (req, res) => {
-  try {
-    const list = await ordersRepo.getAllOrders();
-    return res.json(list);
-  } catch (e) {
-    console.error('[API] Failed to fetch orders', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to fetch orders' });
-  }
-});
-
-app.post('/api/orders', async (req, res) => {
-  try {
-    console.log('[Orders] Incoming order body:', req.body);
-    const buyer = req.body.buyerId ? await usersRepo.getUserById(req.body.buyerId) : null;
-    const farmer = req.body.farmerId ? await usersRepo.getUserById(req.body.farmerId) : null;
-    const product = req.body.productId ? await productsRepo.getProductById(req.body.productId) : null;
-
-    const order = {
-      id: uuidv4(),
-      ...req.body,
-      buyerEmail: req.body.buyerEmail || (buyer && buyer.email) || '',
-      farmerEmail: req.body.farmerEmail || (farmer && farmer.email) || '',
-      productName: req.body.productName || (product && product.name) || '',
-      buyerName: req.body.buyerName || (buyer && buyer.name) || '',
-      farmerName: req.body.farmerName || (farmer && farmer.name) || '',
-      orderDate: new Date().toISOString().split('T')[0],
-      createdAt: new Date().toISOString(),
-      status: req.body.status || 'pending',
-      deliveryStatus: req.body.deliveryStatus || 'pending',
-      paymentStatus: req.body.paymentStatus || (req.body.paymentMethod === 'cod' ? 'pending' : 'paid'),
-    };
-
-    const created = await ordersRepo.createOrder(order);
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: created.buyerId, userName: created.buyerName, userRole: 'buyer', action: 'placed order', targetId: created.id, targetType: 'order', timestamp: new Date().toISOString() });
-
-    try {
-      const notif = {
-        id: uuidv4(),
-        userId: created.farmerId,
-        type: 'order',
-        title: 'New order received',
-        message: `${created.buyerName} placed an order for ${created.productName}`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        actionUrl: '/orders'
-      };
-      const nf = await notificationsRepo.createNotification(notif);
-      if (io) io.to(`user_${created.farmerId}`).emit('notification:new', nf);
-      if (io) io.to(`user_${created.farmerId}`).emit('order:placed', created);
-    } catch (e) { console.error('[Orders] Error notifying farmer of new order:', e && e.message ? e.message : e); }
-
-    try {
-      if (!created.buyerEmail) console.error('[Orders] Missing buyerEmail for order', created.id);
-      if (!created.farmerEmail) console.error('[Orders] Missing farmerEmail for order', created.id);
-      if (created.buyerEmail && created.farmerEmail) {
-        console.log('[Orders] Triggering sendOrderPlacementEmails for', created.id);
-        void sendOrderPlacementEmails(created);
-      } else {
-        console.warn('[Orders] Skipping email sends due to missing email addresses for order', created.id);
-      }
-    } catch (e) { console.error('[Orders] Failed to trigger order emails for', created.id, e); }
-
-    return res.status(201).json(created);
-  } catch (e) {
-    console.error('[API] Failed to create order', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to create order' });
-  }
-});
-
-// Messages
-app.get('/api/messages', async (req, res) => {
-  try {
-    const list = (await messagesRepo.getAllMessages()).map(normalizeMessage);
-    return res.json(list);
-  } catch (e) {
-    console.error('[API] Failed to fetch messages', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to fetch messages' });
-  }
-});
-
-app.post('/api/messages', async (req, res) => {
-  try {
-    const incoming = normalizeMessage(req.body || {});
-    const sender = incoming.senderId ? await usersRepo.getUserById(incoming.senderId) : null;
-
-    const existing = incoming.id ? await messagesRepo.getMessageById(incoming.id) : null;
-    if (existing) {
-      const updated = await messagesRepo.updateMessage(incoming.id, incoming);
-      return res.status(200).json(updated);
-    }
-
-    const created = await messagesRepo.createMessage(incoming);
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: incoming.senderId, userName: incoming.senderName, userRole: sender?.role || 'buyer', action: 'sent message', targetId: created.id, targetType: 'message', details: `To ${incoming.recipientName}`, timestamp: new Date().toISOString() });
-
-    // Create a notification for recipient
-    try {
-      const notif = {
-        id: uuidv4(),
-        userId: incoming.recipientId,
-        type: 'message',
-        title: `New message from ${incoming.senderName}`,
-        message: incoming.content.substring(0, 240),
-        timestamp: incoming.timestamp || new Date().toISOString(),
-        read: false,
-        actionUrl: '/messages'
-      };
-      await notificationsRepo.createNotification(notif);
-      if (io) io.to(`user_${incoming.recipientId}`).emit('notification:new', notif);
-      if (io) io.to(`user_${incoming.recipientId}`).emit('message:new', created);
-    } catch (e) { console.warn('[Messages] Failed to create/emit notification', e && e.message ? e.message : e); }
-
-    return res.status(201).json(created);
-  } catch (e) {
-    console.error('[API] Failed to create message', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to create message' });
-  }
-});
-
-app.put('/api/messages/:id', async (req, res) => {
-  try {
-    const existing = await messagesRepo.getMessageById(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Message not found' });
-    const updated = await messagesRepo.updateMessage(req.params.id, { ...existing, ...req.body });
-    return res.json(updated);
-  } catch (e) {
-    console.error('[API] Failed to update message', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to update message' });
-  }
-});
-
-app.delete('/api/messages/:id', async (req, res) => {
-  try {
-    const existing = await messagesRepo.getMessageById(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Message not found' });
-    await messagesRepo.deleteMessage(req.params.id);
-    const sender = existing.senderId ? await usersRepo.getUserById(existing.senderId) : null;
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: existing.senderId, userName: existing.senderName, userRole: sender?.role || 'buyer', action: 'deleted message', targetId: existing.id, targetType: 'message', details: `To ${existing.recipientName}`, timestamp: new Date().toISOString() });
-    return res.json({ success: true });
-  } catch (e) {
-    console.error('[API] Failed to delete message', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to delete message' });
-  }
-});
-
-// Auth: login
 app.post('/api/auth/login', async (req, res) => {
+  console.log('[Auth] LOGIN START');
+  const { email, password } = req.body || {};
+  console.log('LOGIN PAYLOAD', { email });
+  if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password are required' });
+
   try {
-    const email = normalizeEmail(req.body?.email);
-    const password = req.body?.password || '';
     const user = await usersRepo.findByEmail(email);
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!user) {
+      console.log('[Auth] LOGIN FAILED - user not found', email);
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
 
-    if (!user.passwordHash || !user.passwordSalt) return res.status(401).json({ error: 'No password set for this account' });
+    const provided = String(password);
+    let valid = false;
 
-    try {
-      const derived = (await scryptAsync(password, user.passwordSalt, 64)).toString('hex');
-      if (derived !== user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
-    } catch (e) { return res.status(500).json({ error: 'Unable to verify credentials' }); }
+    // Case 1: bcrypt stored in `password` starting with $2
+    if (user.password && String(user.password).startsWith('$2')) {
+      try { valid = await bcrypt.compare(provided, user.password); } catch (e) { valid = false; }
+    }
 
-    const safe = { ...user };
-    delete safe.passwordHash; delete safe.passwordSalt; delete safe.resetPasswordHash; delete safe.resetPasswordExpiry;
-    try { await activityRepo.addActivityLog({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'logged in', targetType: 'auth', timestamp: new Date().toISOString() }); } catch (e) { console.warn('Failed to log login activity', e && e.message ? e.message : e); }
-    console.log('[Auth] LOGIN SUCCESS', user.email, user.id);
-    return res.json(safe);
-  } catch (e) {
-    console.error('[Auth] LOGIN FAILED', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to process login' });
+    // Case 2: legacy plaintext stored in `password`
+    if (!valid && user.password && !String(user.password).startsWith('$2')) {
+      if (provided === String(user.password)) {
+        valid = true;
+        // migrate plaintext -> bcrypt
+        try {
+          const newHash = await bcrypt.hash(provided, 10);
+          await usersRepo.updateUser(user.id, { password: newHash });
+          console.log('[Auth] Migrated plaintext password to bcrypt for user', user.id);
+        } catch (e) {
+          console.warn('[Auth] Password migration failed for user', user.id, e && e.message ? e.message : e);
+        }
+      }
+    }
+
+    // Case 3: scrypt-based stored as passwordHash + passwordSalt (from reset flow)
+    if (!valid && user.passwordHash && user.passwordSalt) {
+      try {
+        const derived = (await scryptAsync(provided, String(user.passwordSalt), 64)).toString('hex');
+        if (derived === String(user.passwordHash)) {
+          valid = true;
+          // migrate to bcrypt and remove scrypt fields
+          try {
+            const newHash = await bcrypt.hash(provided, 10);
+            await usersRepo.updateUser(user.id, { password: newHash, passwordHash: null, passwordSalt: null });
+            console.log('[Auth] Migrated scrypt password to bcrypt for user', user.id);
+          } catch (e) {
+            console.warn('[Auth] Password migration (scrypt->bcrypt) failed for user', user.id, e && e.message ? e.message : e);
+          }
+        }
+      } catch (e) {
+        console.warn('[Auth] scrypt verification failed', e && e.message ? e.message : e);
+      }
+    }
+
+    if (!valid) {
+      console.log('[Auth] LOGIN FAILED - invalid password for user', user.id);
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    const token = createAuthToken(user);
+    console.log('[Auth] LOGIN SUCCESS', user.id);
+    return res.json({ success: true, user, token });
+  } catch (error) {
+    console.error('[Auth] Login error:', error && error.message ? error.message : error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Signup route (create user)
+app.post('/api/auth/signup', async (req, res) => {
+  console.log('[Auth] SIGNUP START');
+  const payload = req.body || {};
+  console.log('SIGNUP PAYLOAD', { name: payload.name, email: payload.email, role: payload.role });
+
+  const name = String(payload.name || '').trim();
+  const email = normalizeEmail(payload.email);
+  const password = payload.password;
+  const role = String(payload.role || '').trim();
+
+  if (!name || !email || !password || !role) {
+    console.log('[Auth] SIGNUP FAILED - missing fields');
+    return res.status(400).json({ success: false, message: 'name, email, password and role are required' });
+  }
+
+  try {
+    // Ensure no existing user
+    const existing = await usersRepo.findByEmail(email);
+    if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
+
+    // create user - usersRepo.createUser will hash password
+    const userRecord = await usersRepo.createUser({ name, email, password, role, isActive: true, createdAt: new Date().toISOString() });
+    const token = createAuthToken(userRecord);
+    console.log('[Auth] SIGNUP SUCCESS', userRecord.id);
+    return res.status(201).json({ success: true, user: userRecord, token });
+  } catch (err) {
+    console.error('[Auth] SIGNUP FAILED', err && err.message ? err.message : err);
+    return res.status(500).json({ success: false, message: 'Signup failed' });
   }
 });
 
@@ -1138,16 +761,25 @@ async function loadFromFirestore() {
     return;
   }
   try {
-    // Firestore mode: do NOT preload entire collections on startup.
-    // Repositories will fetch data on demand to avoid heavy reads and accidental overwrites.
-    console.log('[Firestore] Data loaded from Firestore');
+    // Firestore mode: verify connectivity before starting server.
+    if (!db) throw new Error('Firestore `db` is not initialized');
+    // perform a simple read to validate permissions/connectivity
+    await db.collection('users').limit(1).get();
+    console.log('[Firestore] Data layer reachable');
   } catch (e) {
-    console.error('[Firestore] Initialization check failed:', e && e.message ? e.message : e);
+    console.error('[Firestore] Initialization check failed:', e && e.stack ? e.stack : e);
+    throw e;
   }
 }
 
+// Start server only after env validation and Firestore readiness
 (async () => {
-  validateStartupEnv();
-  await loadFromFirestore();
-  server.listen(listenTarget, listenHost, () => console.log(`Server running on port ${listenTarget}`));
+  try {
+    validateStartupEnv();
+    await loadFromFirestore();
+    server.listen(listenTarget, listenHost, () => console.log(`Server running on port ${listenTarget}`));
+  } catch (err) {
+    console.error('[Startup] Aborting due to startup failure:', err && err.stack ? err.stack : err);
+    process.exit(1);
+  }
 })();

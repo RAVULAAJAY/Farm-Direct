@@ -52,7 +52,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const fetchUsers = () => request<User[]>('/users');
-export const createUser = (user: Omit<User, 'id'> & { password?: string }) => request<Record<string, any>>('/users', { method: 'POST', body: JSON.stringify(user) });
+export const createUser = (user: Omit<User, 'id'> & { password?: string }) => {
+  console.log('API CREATE USER PAYLOAD', { email: user.email, name: user.name, role: (user as any).role });
+  return request<Record<string, any>>('/auth/signup', { method: 'POST', body: JSON.stringify(user) });
+};
 export const updateUser = (id: string, updates: Partial<User>) => request<User>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export const fetchProducts = () => request<Product[]>('/products');
@@ -107,7 +110,11 @@ export const updateMessageApi = (id: string, updates: Partial<Message>) =>
 export const deleteMessageApi = (id: string) => request<{ success: boolean }>(`/messages/${id}`, { method: 'DELETE' });
 
 // Auth endpoints
-export const loginUser = (email: string, password: string) => request<Record<string, any>>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+export const loginUser = (email: string, password: string) => {
+  const payload = { email, password };
+  console.log('LOGIN PAYLOAD', payload);
+  return request<Record<string, any>>('/auth/login', { method: 'POST', body: JSON.stringify(payload) });
+};
 export const requestPasswordReset = (email: string) => request<Record<string, any>>('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) });
 export const resetPassword = (email: string, token: string, password: string) => request<Record<string, any>>('/auth/reset', { method: 'POST', body: JSON.stringify({ email, token, password }) });
 
