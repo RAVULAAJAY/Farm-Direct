@@ -886,6 +886,17 @@ app.get('/', (req, res) => {
 });
 
 // Notifications API
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const userId = String(req.query?.userId || '').trim();
+    const notifications = await notificationsRepo.getAllNotifications(userId || undefined);
+    return res.json({ success: true, message: 'Notifications fetched', data: notifications });
+  } catch (e) {
+    console.error('[API] Failed to fetch notifications', e && e.message ? e.message : e);
+    return res.status(500).json({ success: false, message: 'Unable to fetch notifications', data: [] });
+  }
+});
+
 app.post('/api/notifications', async (req, res) => {
   try {
     const incoming = {
@@ -900,10 +911,10 @@ app.post('/api/notifications', async (req, res) => {
     } catch (e) {
       console.warn('[Notifications] emit failed', e && e.message ? e.message : e);
     }
-    return res.status(201).json(created);
+    return res.status(201).json({ success: true, message: 'Notification created', data: created });
   } catch (e) {
     console.error('[API] Failed to create notification', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to create notification' });
+    return res.status(500).json({ success: false, message: 'Unable to create notification', data: null });
   }
 });
 
@@ -911,22 +922,22 @@ app.put('/api/notifications/:id', async (req, res) => {
   try {
     const id = req.params.id;
     const existing = await notificationsRepo.getNotificationById(id);
-    if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (!existing) return res.status(404).json({ success: false, message: 'Notification not found', data: null });
     const updated = await notificationsRepo.updateNotification(id, req.body);
     try { if (io) io.to(`user_${updated.userId}`).emit('notification:update', updated); } catch (e) { console.warn('[Notifications] emit update failed', e && e.message ? e.message : e); }
-    return res.json(updated);
-  } catch (e) { console.error('[API] Failed to update notification', e && e.message ? e.message : e); return res.status(500).json({ error: 'Unable to update notification' }); }
+    return res.json({ success: true, message: 'Notification updated', data: updated });
+  } catch (e) { console.error('[API] Failed to update notification', e && e.message ? e.message : e); return res.status(500).json({ success: false, message: 'Unable to update notification', data: null }); }
 });
 
 app.delete('/api/notifications/:id', async (req, res) => {
   try {
     const id = req.params.id;
     const existing = await notificationsRepo.getNotificationById(id);
-    if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (!existing) return res.status(404).json({ success: false, message: 'Notification not found', data: null });
     await notificationsRepo.deleteNotification(id);
     try { if (io) io.to(`user_${existing.userId}`).emit('notification:delete', { id: existing.id }); } catch (e) { console.warn('[Notifications] emit delete failed', e && e.message ? e.message : e); }
-    return res.json({ success: true });
-  } catch (e) { console.error('[API] Failed to delete notification', e && e.message ? e.message : e); return res.status(500).json({ error: 'Unable to delete notification' }); }
+    return res.json({ success: true, message: 'Notification deleted', data: { id: existing.id } });
+  } catch (e) { console.error('[API] Failed to delete notification', e && e.message ? e.message : e); return res.status(500).json({ success: false, message: 'Unable to delete notification', data: null }); }
 });
 
 // Upgrade to HTTP server with Socket.IO

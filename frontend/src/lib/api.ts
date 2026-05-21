@@ -35,6 +35,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
 
     const data = (await res.json()) as T;
+    if (data && typeof data === 'object' && 'success' in (data as any) && 'message' in (data as any) && 'data' in (data as any)) {
+      return (data as any).data as T;
+    }
     if (import.meta.env.DEV) {
       console.log(`[API Response] ${path}:`, data);
     }
