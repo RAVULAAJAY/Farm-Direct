@@ -262,9 +262,19 @@ async function sendOrderStatusEmailToBuyer(order) {
 // When FIRESTORE is enabled the initial admin user will be ensured during startup load.
 
 const app = express();
+const allowedOrigin = String(process.env.FRONTEND_URL || 'https://farm-direct-zeta-swart.vercel.app').trim().replace(/\/$/, '');
+const corsOptions = {
+  origin: allowedOrigin,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
-app.post('/api/auth/login', async (req, res) => {
+async function handleLogin(req, res) {
   console.log('[Auth] LOGIN START');
   const { email, password } = req.body || {};
   console.log('LOGIN PAYLOAD', { email });
@@ -332,10 +342,9 @@ app.post('/api/auth/login', async (req, res) => {
     console.error('[Auth] Login error:', error && error.message ? error.message : error);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
-});
+}
 
-// Signup route (create user)
-app.post('/api/auth/signup', async (req, res) => {
+async function handleSignup(req, res) {
   console.log('[Auth] SIGNUP START');
   const payload = req.body || {};
   console.log('SIGNUP PAYLOAD', { name: payload.name, email: payload.email, role: payload.role });
@@ -364,7 +373,60 @@ app.post('/api/auth/signup', async (req, res) => {
     console.error('[Auth] SIGNUP FAILED', err && err.message ? err.message : err);
     return res.status(500).json({ success: false, message: 'Signup failed' });
   }
-});
+}
+
+async function handleSendOtp(req, res) {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+
+    const otp = String(crypto.randomInt(100000, 1000000));
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    const expiresAt = Date.now() + (5 * 60 * 1000);
+    storeOtp(email, otpHash, expiresAt);
+
+    const sent = await brevoSendOtp(email, otp);
+    if (!sent && (process.env.NODE_ENV || 'development') === 'development') {
+      console.log(`[DEV] OTP for ${email}: ${otp}`);
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[OTP] Send error:', error && error.message ? error.message : error);
+    return res.status(500).json({ success: false, message: 'Unable to send OTP' });
+  }
+}
+
+async function handleVerifyOtp(req, res) {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const otp = String(req.body?.otp || '').trim();
+    if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP are required' });
+
+    const entry = getOtpEntry(email);
+    if (!entry) return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
+    if (Number(entry.expiresAt) < Date.now()) {
+      deleteOtpEntry(email);
+      return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
+    }
+
+    const providedHash = crypto.createHash('sha256').update(otp).digest('hex');
+    if (providedHash !== entry.otpHash) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
+    }
+
+    deleteOtpEntry(email);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[OTP] Verify error:', error && error.message ? error.message : error);
+    return res.status(500).json({ success: false, message: 'Unable to verify OTP' });
+  }
+}
+
+app.post(['/api/auth/login', '/login'], handleLogin);
+app.post(['/api/auth/signup', '/signup'], handleSignup);
+app.post(['/api/auth/send-otp', '/send-otp'], handleSendOtp);
+app.post(['/api/auth/verify-otp', '/verify-otp'], handleVerifyOtp);
 
 // Auth: request password reset
 app.post('/api/auth/forgot', async (req, res) => {
