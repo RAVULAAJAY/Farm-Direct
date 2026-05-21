@@ -15,7 +15,6 @@ import {
   ValidationError,
 } from '@/lib/validation';
 import { getAdminLoginEmail, hasAdminLoginCredentials, isAdminCredentialMatch } from '@/lib/adminAuth';
-import { fetchUsers } from '@/lib/api';
 import * as api from '@/lib/api';
 import { UserRole, type User } from '@/context/AuthContext';
 import { useGlobalState } from '@/context/GlobalStateContext';
@@ -658,136 +657,86 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
         }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
       const normalizedEmail = formData.email.trim().toLowerCase();
-      let existingUser = users.find(
+      let existingUser: User | undefined;
+
+      if (submitMode === 'login') {
+        try {
+          const remoteUser = (await api.loginUser(normalizedEmail, formData.password)) as User;
+          if (remoteUser.role !== role) {
+            setGeneralError(`This account is not registered as a ${role}. Please select the correct role.`);
+            return;
+          }
+          onSuccess(remoteUser);
+          return;
+        } catch (error) {
+          setGeneralError(error instanceof Error ? error.message : 'Unable to sign in right now. Please try again.');
+          return;
+        }
+      }
+
+      existingUser = users.find(
         (entry) => entry.email.trim().toLowerCase() === normalizedEmail && entry.role === role
       );
 
-      // Fallback to backend lookup when local users state is still hydrating.
-      if (submitMode === 'login' && !existingUser) {
-        try {
-          const remoteUsers = await fetchUsers();
-          const remoteUser = remoteUsers.find(
-            (entry) => entry.email.trim().toLowerCase() === normalizedEmail && entry.role === role
-          );
-          existingUser = remoteUser
-            ? ({
-                ...remoteUser,
-                phone: remoteUser.phone ?? '',
-                location: remoteUser.location ?? '',
-              } as User)
-            : undefined;
-        } catch {
-          // Keep existing behavior below when remote lookup is unavailable.
-        }
-      }
-
-      // If we're logging in and found a matching user, try server-side login first
-      if (submitMode === 'login' && existingUser) {
-        try {
-          const api = await import('@/lib/api');
-          const remoteUser = await api.loginUser(normalizedEmail, formData.password);
-          onSuccess(remoteUser as User);
-          setIsSubmitting(false);
-          return;
-        } catch (err) {
-          // server login failed - fall back to local behavior below
-        }
-      }
-
-      if (submitMode === 'login' && !existingUser) {
-        setGeneralError('No account found for this role. Please sign up first.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (submitMode === 'signup' && existingUser) {
+      if (existingUser) {
         setGeneralError('An account with this email already exists for this role. Please sign in.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (submitMode === 'login' && existingUser && existingUser.isActive === false) {
-        setGeneralError('Your account is disabled by admin. Please contact support.');
-        setIsSubmitting(false);
         return;
       }
 
       const user: User =
-        submitMode === 'login' && existingUser
-          ? existingUser
-          : {
-              id: existingUser?.id ?? `${role}_${Date.now()}`,
-              name: submitMode === 'signup' ? formData.name.trim() : existingUser?.name ?? formData.email.split('@')[0],
-              email: normalizedEmail,
-              phone: submitMode === 'signup' ? formData.phone.trim() : existingUser?.phone ?? '',
-              location:
-                submitMode === 'signup'
-                  ? (isFarmerSignup ? formData.address.trim() : formData.location.trim())
-                  : existingUser?.location ?? '',
-              role,
-              profilePhoto:
-                role === 'farmer' || role === 'buyer'
-                  ? farmerProfilePhoto || existingUser?.profilePhoto
-                  : existingUser?.profilePhoto,
-              farmName: role === 'farmer' ? existingUser?.farmName ?? `${formData.name.trim()}'s Farm` : undefined,
-              cropTypes: role === 'farmer' ? existingUser?.cropTypes ?? ['Mixed Crops'] : undefined,
-              paymentDetails:
-                role === 'farmer' || role === 'buyer'
-                  ? {
-                      bankName: formData.bankName.trim() || existingUser?.paymentDetails?.bankName || 'UPI Only',
-                      accountNumber:
-                        formData.accountNumber.trim() ||
-                        existingUser?.paymentDetails?.accountNumber ||
-                        '000000000',
-                      ifscOrUpi:
-                        formData.upiId.trim() ||
-                        formData.ifscCode.trim() ||
-                        existingUser?.paymentDetails?.ifscOrUpi ||
-                        '',
-                    }
-                  : existingUser?.paymentDetails,
-              farmDetails:
-                role === 'farmer'
-                  ? `Farm at ${formData.address.trim()} | Coordinates ${formData.farmLatitude}, ${formData.farmLongitude}`
-                  : existingUser?.farmDetails,
-              farmerOnboarding:
-                role === 'farmer' && submitMode === 'signup'
-                  ? {
-                      address: formData.address.trim(),
-                      farmLocation: {
-                        latitude: Number(formData.farmLatitude),
-                        longitude: Number(formData.farmLongitude),
-                      },
-                      idProofFileName,
-                      idProofDataUrl: idProofDataUrl || undefined,
-                      upiId: formData.upiId.trim() || undefined,
-                      ifscCode: formData.ifscCode.trim() || undefined,
-                      bankAccountNumber: formData.accountNumber.trim() || undefined,
-                      bankName: formData.bankName.trim() || undefined,
-                      phoneVerified: true,
-                    }
-                  : existingUser?.farmerOnboarding,
-              buyerOnboarding:
-                role === 'buyer' && submitMode === 'signup'
-                  ? {
-                      location: formData.location.trim(),
-                      locationCoordinates: {
-                        latitude: Number(formData.farmLatitude),
-                        longitude: Number(formData.farmLongitude),
-                      },
-                      profilePhotoFileName: farmerPhotoName || undefined,
-                      idProofFileName: buyerIdProofFileName || undefined,
-                      idProofDataUrl: buyerIdProofDataUrl || undefined,
-                    }
-                  : existingUser?.buyerOnboarding,
-              createdAt: existingUser?.createdAt ?? new Date().toISOString(),
-            };
+        {
+          id: existingUser?.id ?? `${role}_${Date.now()}`,
+          name: formData.name.trim(),
+          email: normalizedEmail,
+          phone: formData.phone.trim(),
+          location: isFarmerSignup ? formData.address.trim() : formData.location.trim(),
+          role,
+          profilePhoto: role === 'farmer' || role === 'buyer' ? farmerProfilePhoto : undefined,
+          farmName: role === 'farmer' ? `${formData.name.trim()}'s Farm` : undefined,
+          cropTypes: role === 'farmer' ? ['Mixed Crops'] : undefined,
+          paymentDetails:
+            role === 'farmer' || role === 'buyer'
+              ? {
+                  bankName: formData.bankName.trim() || 'UPI Only',
+                  accountNumber: formData.accountNumber.trim() || '000000000',
+                  ifscOrUpi: formData.upiId.trim() || formData.ifscCode.trim() || '',
+                }
+              : undefined,
+          farmDetails: role === 'farmer' ? `Farm at ${formData.address.trim()} | Coordinates ${formData.farmLatitude}, ${formData.farmLongitude}` : undefined,
+          farmerOnboarding: role === 'farmer'
+            ? {
+                address: formData.address.trim(),
+                farmLocation: {
+                  latitude: Number(formData.farmLatitude),
+                  longitude: Number(formData.farmLongitude),
+                },
+                idProofFileName,
+                idProofDataUrl: idProofDataUrl || undefined,
+                upiId: formData.upiId.trim() || undefined,
+                ifscCode: formData.ifscCode.trim() || undefined,
+                bankAccountNumber: formData.accountNumber.trim() || undefined,
+                bankName: formData.bankName.trim() || undefined,
+                phoneVerified: true,
+              }
+            : undefined,
+          buyerOnboarding: role === 'buyer'
+            ? {
+                location: formData.location.trim(),
+                locationCoordinates: {
+                  latitude: Number(formData.farmLatitude),
+                  longitude: Number(formData.farmLongitude),
+                },
+                profilePhotoFileName: farmerPhotoName || undefined,
+                idProofFileName: buyerIdProofFileName || undefined,
+                idProofDataUrl: buyerIdProofDataUrl || undefined,
+              }
+            : undefined,
+          createdAt: new Date().toISOString(),
+        };
 
-      await upsertUser(user);
-      onSuccess(user);
+      const savedUser = await upsertUser(user);
+      onSuccess(savedUser ?? user);
     } catch (error) {
       console.error('Auth form submission error:', error);
       setGeneralError(error instanceof Error ? error.message : 'An error occurred while submitting the form. Please try again.');

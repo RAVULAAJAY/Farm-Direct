@@ -8,8 +8,10 @@ async function getAllOtps() {
 }
 
 async function setAllOtps(items) {
+  if (String(process.env.ALLOW_BULK_SET || '').toLowerCase() !== 'true') throw new Error('Bulk set disabled. Set ALLOW_BULK_SET=true to enable.');
   if (!db) throw new Error('Firebase not initialized');
-  return setCollectionFromArray('otps', items);
+  const r = await setCollectionFromArray('otps', items);
+  return r;
 }
 
 async function addOtp(item) {

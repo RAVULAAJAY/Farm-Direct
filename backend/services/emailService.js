@@ -1,11 +1,9 @@
 const Brevo = require('@getbrevo/brevo');
-const fs = require('fs');
-const path = require('path');
-
-const DEBUG_LOG = path.resolve(__dirname, '..', 'email-debug.log');
-
 function appendDebug(entry) {
-  try { fs.appendFileSync(DEBUG_LOG, JSON.stringify(entry) + '\n'); } catch (e) {}
+  // Avoid filesystem writes in runtime. Use console.debug when enabled.
+  if (String(process.env.EMAIL_DEBUG_LOG || '').toLowerCase() === 'true') {
+    try { console.debug('[EmailDebug]', JSON.stringify(entry)); } catch (e) {}
+  }
 }
 
 let senderWrapper = null;

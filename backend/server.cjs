@@ -3,8 +3,9 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
+// Note: local filesystem persistence removed — Firestore is the single source of truth.
 const crypto = require('crypto');
+const { promisify } = require('util');
 const { v4: uuidv4 } = require('uuid');
 const brevoSendOtp = require('./sendOtpEmail');
 const emailService = require('./services/emailService');
@@ -15,55 +16,40 @@ const messagesRepo = require('./repositories/messagesRepository');
 const notificationsRepo = require('./repositories/notificationsRepository');
 const reviewsRepo = require('./repositories/reviewsRepository');
 const activityRepo = require('./repositories/activityRepository');
-const otpsRepo = require('./repositories/otpsRepository');
+
+const scryptAsync = promisify(crypto.scrypt);
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
 
 // All transactional emails use Brevo via `emailService`.
 function getFromAddress() {
   return String(process.env.EMAIL_FROM || 'no-reply@farm-direct.local').trim();
 }
 
-const DATA_DIR = path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
-const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
-const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
-const ACTIVITY_FILE = path.join(DATA_DIR, 'activityLogs.json');
-const OTPS_FILE = path.join(DATA_DIR, 'otps.json');
+// Ephemeral OTP store (do NOT persist OTPs permanently)
+const otpStore = new Map(); // key: email, value: { otpHash, expiresAt }
 
-function ensureDataDir(){
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+function storeOtp(email, otpHash, expiresAt) {
+  otpStore.set(String(email).toLowerCase(), { otpHash, expiresAt });
 }
 
-function loadData(filePath){
-  // legacy file fallback for local development
-  if (!fs.existsSync(filePath)) return [];
-  try { return JSON.parse(fs.readFileSync(filePath, 'utf8') || '[]'); } catch { return []; }
+function getOtpEntry(email) {
+  return otpStore.get(String(email).toLowerCase()) || null;
 }
 
-function saveData(filePath, data){
-  // If FIRESTORE is enabled, persist only to Firestore (no JSON fallbacks).
-  if (process.env.USE_FIRESTORE === 'true') {
-    (async () => {
-      try {
-        if (filePath === USERS_FILE) await usersRepo.setAllUsers(data);
-        else if (filePath === PRODUCTS_FILE) await productsRepo.setAllProducts(data);
-        else if (filePath === ORDERS_FILE) await ordersRepo.setAllOrders(data);
-        else if (filePath === MESSAGES_FILE) await messagesRepo.setAllMessages(data);
-        else if (filePath === ACTIVITY_FILE) await activityRepo.setAllActivityLogs(data);
-        else if (filePath === OTPS_FILE) await otpsRepo.setAllOtps(data);
-        else if (typeof NOTIFICATIONS_FILE !== 'undefined' && filePath === NOTIFICATIONS_FILE) {
-          await (notificationsRepo.setAllNotifications ? notificationsRepo.setAllNotifications(data) : notificationsRepo.createNotification(data));
-        } else {
-          console.warn('[saveData] USE_FIRESTORE=true but no Firestore mapping for file:', filePath);
-        }
-      } catch (e) {
-        console.error('[saveData] Failed to persist to Firestore:', e && e.message ? e.message : e);
-      }
-    })();
-    return;
+function deleteOtpEntry(email) {
+  return otpStore.delete(String(email).toLowerCase());
+}
+
+function cleanupExpiredOtps() {
+  const now = Date.now();
+  let removed = 0;
+  for (const [email, entry] of otpStore.entries()) {
+    if (Number(entry.expiresAt) <= now) { otpStore.delete(email); removed++; }
   }
-
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  if (removed > 0) console.log(`[OTP] Cleaned up ${removed} expired OTP record(s)`);
 }
 
 function normalizeMessage(message) {
@@ -80,16 +66,9 @@ function normalizeMessage(message) {
   };
 }
 
-ensureDataDir();
-
 // in-memory state (will be populated from Firestore when enabled)
-let users = [];
-let products = [];
-let orders = [];
-let messages = [];
-let activityLogs = [];
-let notifications = [];
-let otps = [];
+// In-memory arrays removed — Firestore is the single source of truth.
+// Do NOT use in-memory arrays for application state.
 
 // Environment / config
 const PORT = process.env.PORT || 4000;
@@ -135,9 +114,9 @@ async function sendPasswordResetEmail({ email, resetLink }) {
   }
 }
 
-function getOrderPartyDetails(order) {
-  const buyer = users.find((u) => String(u.id) === String(order.buyerId));
-  const farmer = users.find((u) => String(u.id) === String(order.farmerId));
+async function getOrderPartyDetails(order) {
+  const buyer = order.buyerId ? await usersRepo.getUserById(order.buyerId) : null;
+  const farmer = order.farmerId ? await usersRepo.getUserById(order.farmerId) : null;
 
   return {
     buyer,
@@ -169,11 +148,11 @@ function buildOrderDetailsText(order) {
 
 async function sendOrderPlacementEmails(order) {
   console.log('[Order Emails] Processing order', order.id);
-  const { buyerEmail, farmerEmail, buyerName, farmerName, buyerPhone, buyerLocation } = getOrderPartyDetails(order);
+  const { buyerEmail, farmerEmail, buyerName, farmerName, buyerPhone, buyerLocation } = await getOrderPartyDetails(order);
   const details = buildOrderDetailsText(order);
 
   try {
-    const { buyerEmail: be, farmerEmail: fe } = getOrderPartyDetails(order);
+    const { buyerEmail: be, farmerEmail: fe } = await getOrderPartyDetails(order);
 
     if (fe) {
       console.log('[Order Emails] Sending farmer email to', fe, 'for order', order.id);
@@ -222,7 +201,7 @@ function getOrderStatusEmailMessage(order) {
 
 async function sendOrderStatusEmailToBuyer(order) {
   try {
-    const { buyerEmail } = getOrderPartyDetails(order);
+    const { buyerEmail } = await getOrderPartyDetails(order);
     if (!buyerEmail) return;
     void emailService.sendOrderStatusEmail(order)
       .then(() => console.log('[Order Status] Email sent to buyer:', buyerEmail))
@@ -270,60 +249,56 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
-// Notifications persistence
-const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
-function loadNotifications() {
-  return loadData(NOTIFICATIONS_FILE);
-}
-function saveNotifications(data){ saveData(NOTIFICATIONS_FILE, data); }
-// NOTE: `notifications` and `otps` are declared earlier as in-memory arrays
-function loadOtps(){ return loadData(OTPS_FILE); }
-function saveOtps(data){ saveData(OTPS_FILE, data); }
+// Notifications persistence is handled via `notificationsRepository`.
+// OTPs are ephemeral and stored only in memory (see otpStore helpers).
 
-app.get('/api/users', (req, res) => res.json(users));
-app.post('/api/users', (req, res) => {
-  // Handle password hashing if provided
-  const incoming = { ...req.body };
-  const plainPassword = typeof incoming.password === 'string' ? incoming.password : undefined;
-  delete incoming.password;
-
-  const user = { id: uuidv4(), ...incoming, isActive: true, joinedDate: new Date().toISOString() };
-
-  if (plainPassword) {
-    const salt = crypto.randomBytes(16).toString('hex');
-    const derived = crypto.scryptSync(plainPassword, salt, 64).toString('hex');
-    user.passwordSalt = salt;
-    user.passwordHash = derived;
-  }
-
-  users.push(user);
-  saveData(USERS_FILE, users);
-  activityLogs.unshift({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'registered account', timestamp: new Date().toISOString() });
-  saveData(ACTIVITY_FILE, activityLogs);
-  // Never return passwordHash/salt in responses
-  const safe = { ...user };
-  delete safe.passwordHash;
-  delete safe.passwordSalt;
-  res.status(201).json(safe);
-  // Fire-and-forget: send account created email via centralized emailService
+app.get('/api/users', async (req, res) => {
   try {
-    void emailService.sendAccountCreatedEmail(user)
-      .then(() => console.log('[Account Created] Email sent to', user.email))
-      .catch(err => console.warn('[Account Created] Email failed for', user.email, err && err.message ? err.message : err));
+    const all = await usersRepo.getAllUsers();
+    const safe = all.map(u => {
+      const s = { ...u };
+      delete s.passwordHash; delete s.passwordSalt; delete s.resetPasswordHash; delete s.resetPasswordExpiry;
+      return s;
+    });
+    return res.json(safe);
   } catch (e) {
-    console.warn('[Account Created] Unexpected error triggering account email:', e && e.message ? e.message : e);
+    console.error('[API] Failed to fetch users', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to fetch users' });
   }
 });
 
-function cleanupExpiredOtps() {
-  const now = Date.now();
-  const before = otps.length;
-  otps = otps.filter((entry) => Number(entry.expiresAt) > now);
-  if (otps.length !== before) {
-    saveOtps(otps);
-    console.log(`[OTP] Cleaned up ${before - otps.length} expired OTP record(s)`);
+app.post('/api/users', async (req, res) => {
+  try {
+    const incoming = { ...req.body };
+    incoming.email = normalizeEmail(incoming.email);
+    const plainPassword = typeof incoming.password === 'string' ? incoming.password : undefined;
+    delete incoming.password;
+
+    const user = { id: uuidv4(), ...incoming, isActive: true, joinedDate: new Date().toISOString() };
+    if (plainPassword) {
+      const salt = crypto.randomBytes(16).toString('hex');
+      const derived = (await scryptAsync(plainPassword, salt, 64)).toString('hex');
+      user.passwordSalt = salt;
+      user.passwordHash = derived;
+    }
+
+    const created = await usersRepo.createUser(user);
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: created.id, userName: created.name, userRole: created.role, action: 'registered account', timestamp: new Date().toISOString() });
+
+    const safe = { ...created };
+    delete safe.passwordHash; delete safe.passwordSalt; delete safe.resetPasswordHash; delete safe.resetPasswordExpiry;
+    res.status(201).json(safe);
+
+    try {
+      void emailService.sendAccountCreatedEmail(created).then(() => console.log('[Account Created] Email sent to', created.email)).catch(err => console.warn('[Account Created] Email failed for', created.email, err && err.message ? err.message : err));
+    } catch (e) { console.warn('[Account Created] Unexpected error triggering account email:', e && e.message ? e.message : e); }
+  } catch (e) {
+    console.error('[API] Failed to create user', e && e.message ? e.message : e);
+    res.status(500).json({ error: 'Unable to create user' });
   }
-}
+});
+
+// legacy OTP persistence removed; using ephemeral in-memory OTP store (see storeOtp/getOtpEntry)
 
 async function sendOtpEmail(req, res, { resend = false } = {}) {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
@@ -339,10 +314,9 @@ async function sendOtpEmail(req, res, { resend = false } = {}) {
   const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
   const expiresAt = Date.now() + (5 * 60 * 1000);
 
-  otps = otps.filter((entry) => entry.email !== email);
-  otps.push({ email, otpHash, expiresAt });
-  saveOtps(otps);
-  console.log(`[OTP SEND] ✓ OTP stored for ${email}, expires at: ${new Date(expiresAt).toISOString()}`);
+  // Store OTP only in-memory (ephemeral)
+  storeOtp(email, otpHash, expiresAt);
+  console.log(`[OTP SEND] ✓ OTP stored in-memory for ${email}, expires at: ${new Date(expiresAt).toISOString()}`);
   // Prefer Brevo API for OTP sends
   if (process.env.BREVO_API_KEY && typeof brevoSendOtp === 'function') {
     try {
@@ -391,22 +365,18 @@ app.post('/api/auth/verify-otp', (req, res) => {
     return res.status(400).json({ error: 'Email and OTP are required' });
   }
 
-  const entryIndex = otps.findIndex((e) => e.email === email);
-  if (entryIndex < 0) {
+  const entry = getOtpEntry(email);
+  if (!entry) {
     console.warn(`[OTP VERIFY] ✗ No OTP found for email: ${email}`);
     return res.status(400).json({ error: 'OTP not found or expired' });
   }
 
-  const entry = otps[entryIndex];
   const now = Date.now();
   const expiresAt = Number(entry.expiresAt);
-  const isExpired = now > expiresAt;
-
-  if (isExpired) {
+  if (now > expiresAt) {
     const expiredSeconds = Math.floor((now - expiresAt) / 1000);
     console.warn(`[OTP VERIFY] ✗ OTP expired for ${email} (${expiredSeconds}s ago)`);
-    otps.splice(entryIndex, 1);
-    saveOtps(otps);
+    deleteOtpEntry(email);
     return res.status(400).json({ error: 'OTP expired' });
   }
 
@@ -417,453 +387,394 @@ app.post('/api/auth/verify-otp', (req, res) => {
   }
 
   // Valid - remove entry
-  otps.splice(entryIndex, 1);
-  saveOtps(otps);
-
+  deleteOtpEntry(email);
   console.log(`[OTP VERIFY] ✓ Email verified successfully for: ${email}`);
   res.json({ success: true, message: 'Email verified successfully' });
 });
-app.put('/api/users/:id', (req, res) => {
-  const idx = users.findIndex((u) => u.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'User not found' });
-  
-  // Allow password change via PUT (hash securely)
-  const updates = { ...req.body };
-  if (typeof updates.password === 'string' && updates.password.length > 0) {
-    // SECURITY: Require old password verification
-    if (!updates.oldPassword) {
-      return res.status(400).json({ error: 'Current password required to change password' });
-    }
-    
-    try {
-      // Verify old password
-      const oldDerived = crypto.scryptSync(String(updates.oldPassword), users[idx].passwordSalt || '', 64).toString('hex');
-      if (oldDerived !== users[idx].passwordHash) {
-        return res.status(401).json({ error: 'Current password is incorrect' });
-      }
-    } catch (e) {
-      return res.status(500).json({ error: 'Unable to verify password' });
-    }
-    
-    const salt = crypto.randomBytes(16).toString('hex');
-    const derived = crypto.scryptSync(updates.password, salt, 64).toString('hex');
-    updates.passwordSalt = salt;
-    updates.passwordHash = derived;
-    delete updates.password;
-    delete updates.oldPassword;
-  }
-
-  users[idx] = { ...users[idx], ...updates };
-  saveData(USERS_FILE, users);
-  const safe = { ...users[idx] };
-  delete safe.passwordHash;
-  delete safe.passwordSalt;
-  res.json(safe);
-});
-
-app.get('/api/products', (req, res) => res.json(products));
-app.post('/api/products', (req, res) => {
-  const product = { id: uuidv4(), ...req.body, createdAt: new Date().toISOString() };
-  products.push(product);
-  saveData(PRODUCTS_FILE, products);
-  activityLogs.unshift({ id: uuidv4(), userId: product.farmerId, userName: product.farmerName, userRole: 'farmer', action: 'uploaded product', targetId: product.id, targetType: 'product', timestamp: new Date().toISOString() });
-  saveData(ACTIVITY_FILE, activityLogs);
-  res.status(201).json(product);
-});
-app.put('/api/products/:id', (req, res) => {
-  const idx = products.findIndex((p) => p.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Product not found' });
-  products[idx] = { ...products[idx], ...req.body };
-  saveData(PRODUCTS_FILE, products);
-  res.json(products[idx]);
-});
-
-app.post('/api/products/:id/reviews', (req, res) => {
-  const idx = products.findIndex((p) => p.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Product not found' });
-
-  const currentProduct = products[idx];
-  const review = {
-    id: uuidv4(),
-    userId: req.body.userId,
-    userName: req.body.userName,
-    rating: Number(req.body.rating) || 0,
-    title: req.body.title || 'Buyer review',
-    content: req.body.content || '',
-    timestamp: req.body.timestamp || new Date().toISOString(),
-    verified: req.body.verified ?? true,
-    helpful: Number(req.body.helpful) || 0,
-    notHelpful: Number(req.body.notHelpful) || 0,
-    images: Array.isArray(req.body.images) ? req.body.images : [],
-    purchaseVerified: req.body.purchaseVerified ?? true,
-  };
-
-  const existingReviews = Array.isArray(currentProduct.reviewEntries) ? currentProduct.reviewEntries : [];
-  const existingCount = Number(currentProduct.reviews) || existingReviews.length;
-  const existingRating = Number(currentProduct.rating) || 0;
-  const nextCount = existingCount + 1;
-  const nextRating = nextCount > 0 ? ((existingRating * existingCount) + review.rating) / nextCount : review.rating;
-
-  products[idx] = {
-    ...currentProduct,
-    rating: Number(nextRating.toFixed(2)),
-    reviews: nextCount,
-    reviewEntries: [review, ...existingReviews],
-  };
-
-  saveData(PRODUCTS_FILE, products);
-
-  res.status(201).json(products[idx]);
-});
-app.delete('/api/products/:id', (req, res) => {
-  const idx = products.findIndex((p) => p.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Product not found' });
-  const removed = products.splice(idx, 1)[0];
-  saveData(PRODUCTS_FILE, products);
-  activityLogs.unshift({ id: uuidv4(), userId: removed.farmerId, userName: removed.farmerName, userRole: 'farmer', action: 'deleted product', targetId: removed.id, targetType: 'product', timestamp: new Date().toISOString() });
-  saveData(ACTIVITY_FILE, activityLogs);
-  res.json({ success: true });
-});
-
-app.get('/api/orders', (req, res) => res.json(orders));
-app.post('/api/orders', (req, res) => {
-  console.log('[Orders] Incoming order body:', req.body);
-
-  // Resolve party and product data for fallbacks
-  const buyer = users.find((u) => String(u.id) === String(req.body.buyerId));
-  const farmer = users.find((u) => String(u.id) === String(req.body.farmerId));
-  const product = products.find((p) => String(p.id) === String(req.body.productId));
-
-  const order = {
-    id: uuidv4(),
-    ...req.body,
-    // Ensure fallback values are present for email and product fields
-    buyerEmail: req.body.buyerEmail || (buyer && buyer.email) || '',
-    farmerEmail: req.body.farmerEmail || (farmer && farmer.email) || '',
-    productName: req.body.productName || (product && product.name) || '',
-    buyerName: req.body.buyerName || (buyer && buyer.name) || '',
-    farmerName: req.body.farmerName || (farmer && farmer.name) || '',
-    orderDate: new Date().toISOString().split('T')[0],
-    createdAt: new Date().toISOString(),
-    status: req.body.status || 'pending',
-    deliveryStatus: req.body.deliveryStatus || 'pending',
-    paymentStatus: req.body.paymentStatus || (req.body.paymentMethod === 'cod' ? 'pending' : 'paid'),
-  };
-
-  orders.push(order);
-  saveData(ORDERS_FILE, orders);
-  activityLogs.unshift({ id: uuidv4(), userId: order.buyerId, userName: order.buyerName, userRole: 'buyer', action: 'placed order', targetId: order.id, targetType: 'order', timestamp: new Date().toISOString() });
-  saveData(ACTIVITY_FILE, activityLogs);
-  // Notify farmer
+app.put('/api/users/:id', async (req, res) => {
   try {
-    const notif = {
-      id: uuidv4(),
-      userId: order.farmerId,
-      type: 'order',
-      title: 'New order received',
-      message: `${order.buyerName} placed an order for ${order.productName}`,
-      timestamp: new Date().toISOString(),
-      read: false,
-      actionUrl: '/orders'
-    };
-    notifications.unshift(notif);
-    saveNotifications(notifications);
-    if (io) io.to(`user_${order.farmerId}`).emit('notification:new', notif);
-    if (io) io.to(`user_${order.farmerId}`).emit('order:placed', order);
-  } catch(e) {
-    console.error('[Orders] Error notifying farmer of new order:', e && e.message ? e.message : e);
-  }
+    const id = req.params.id;
+    const existing = await usersRepo.getUserById(id);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
 
-  // Log order created and key fields for debugging (including the final resolved object)
-  try {
-    console.log('[Orders] Created order:', order.id, 'product:', order.productName, 'quantity:', order.quantity, 'totalPrice:', order.totalPrice);
-    console.log('[Orders] Buyer email:', order.buyerEmail, 'Farmer email:', order.farmerEmail);
-    console.log('[Orders] Final order object:', order);
-  } catch (e) {}
+    const updates = { ...req.body };
+    if (typeof updates.email === 'string') {
+      updates.email = normalizeEmail(updates.email);
+    }
+    if (typeof updates.password === 'string' && updates.password.length > 0) {
+      if (!updates.oldPassword) return res.status(400).json({ error: 'Current password required to change password' });
+      try {
+        const oldDerived = (await scryptAsync(String(updates.oldPassword), existing.passwordSalt || '', 64)).toString('hex');
+        if (oldDerived !== existing.passwordHash) return res.status(401).json({ error: 'Current password is incorrect' });
+      } catch (e) { return res.status(500).json({ error: 'Unable to verify password' }); }
 
-  // Trigger order-related emails (fire-and-forget) only when required fields are present
-  try {
-    if (!order.buyerEmail) {
-      console.error('[Orders] Missing buyerEmail for order', order.id);
+      const salt = crypto.randomBytes(16).toString('hex');
+      const derived = (await scryptAsync(updates.password, salt, 64)).toString('hex');
+      updates.passwordSalt = salt;
+      updates.passwordHash = derived;
+      delete updates.password;
+      delete updates.oldPassword;
     }
-    if (!order.farmerEmail) {
-      console.error('[Orders] Missing farmerEmail for order', order.id);
-    }
-    if (order.buyerEmail && order.farmerEmail) {
-      console.log('[Orders] Triggering sendOrderPlacementEmails for', order.id);
-      void sendOrderPlacementEmails(order);
-    } else {
-      console.warn('[Orders] Skipping email sends due to missing email addresses for order', order.id);
-    }
+
+    const updated = await usersRepo.updateUser(id, updates);
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: updated.id, userName: updated.name, userRole: updated.role, action: 'updated profile', timestamp: new Date().toISOString() });
+
+    const safe = { ...updated };
+    delete safe.passwordHash; delete safe.passwordSalt; delete safe.resetPasswordHash; delete safe.resetPasswordExpiry;
+    res.json(safe);
   } catch (e) {
-    console.error('[Orders] Failed to trigger order emails for', order.id, e);
+    console.error('[API] Failed to update user', e && e.message ? e.message : e);
+    res.status(500).json({ error: 'Unable to update user' });
   }
+});
 
-  res.status(201).json(order);
+app.get('/api/products', async (req, res) => {
+  try {
+    const list = await productsRepo.getAllProducts();
+    return res.json(list);
+  } catch (e) {
+    console.error('[API] Failed to fetch products', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to fetch products' });
+  }
+});
+
+app.post('/api/products', async (req, res) => {
+  try {
+    const product = { id: uuidv4(), ...req.body };
+    const created = await productsRepo.createProduct(product);
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: created.farmerId, userName: created.farmerName, userRole: 'farmer', action: 'uploaded product', targetId: created.id, targetType: 'product', timestamp: new Date().toISOString() });
+    res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to create product', e && e.message ? e.message : e);
+    res.status(500).json({ error: 'Unable to create product' });
+  }
+});
+
+app.put('/api/products/:id', async (req, res) => {
+  try {
+    const existing = await productsRepo.getProductById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Product not found' });
+    const updated = await productsRepo.updateProduct(req.params.id, req.body);
+    res.json(updated);
+  } catch (e) {
+    console.error('[API] Failed to update product', e && e.message ? e.message : e);
+    res.status(500).json({ error: 'Unable to update product' });
+  }
+});
+
+app.post('/api/products/:id/reviews', async (req, res) => {
+  try {
+    const productId = req.params.id;
+    const reviewPayload = {
+      userId: req.body.userId,
+      userName: req.body.userName,
+      rating: Number(req.body.rating) || 0,
+      title: req.body.title || 'Buyer review',
+      content: req.body.content || '',
+      verified: req.body.verified ?? true,
+      helpful: Number(req.body.helpful) || 0,
+      notHelpful: Number(req.body.notHelpful) || 0,
+      images: Array.isArray(req.body.images) ? req.body.images : [],
+      purchaseVerified: req.body.purchaseVerified ?? true,
+    };
+
+    await reviewsRepo.addReview(productId, reviewPayload);
+    const updatedProduct = await productsRepo.getProductById(productId);
+    return res.status(201).json(updatedProduct);
+  } catch (e) {
+    console.error('[API] Failed to add review', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to add review' });
+  }
+});
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    const existing = await productsRepo.getProductById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Product not found' });
+    await productsRepo.deleteProduct(req.params.id);
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: existing.farmerId, userName: existing.farmerName, userRole: 'farmer', action: 'deleted product', targetId: existing.id, targetType: 'product', timestamp: new Date().toISOString() });
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[API] Failed to delete product', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to delete product' });
+  }
+});
+
+app.get('/api/orders', async (req, res) => {
+  try {
+    const list = await ordersRepo.getAllOrders();
+    return res.json(list);
+  } catch (e) {
+    console.error('[API] Failed to fetch orders', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to fetch orders' });
+  }
+});
+
+app.post('/api/orders', async (req, res) => {
+  try {
+    console.log('[Orders] Incoming order body:', req.body);
+    const buyer = req.body.buyerId ? await usersRepo.getUserById(req.body.buyerId) : null;
+    const farmer = req.body.farmerId ? await usersRepo.getUserById(req.body.farmerId) : null;
+    const product = req.body.productId ? await productsRepo.getProductById(req.body.productId) : null;
+
+    const order = {
+      id: uuidv4(),
+      ...req.body,
+      buyerEmail: req.body.buyerEmail || (buyer && buyer.email) || '',
+      farmerEmail: req.body.farmerEmail || (farmer && farmer.email) || '',
+      productName: req.body.productName || (product && product.name) || '',
+      buyerName: req.body.buyerName || (buyer && buyer.name) || '',
+      farmerName: req.body.farmerName || (farmer && farmer.name) || '',
+      orderDate: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
+      status: req.body.status || 'pending',
+      deliveryStatus: req.body.deliveryStatus || 'pending',
+      paymentStatus: req.body.paymentStatus || (req.body.paymentMethod === 'cod' ? 'pending' : 'paid'),
+    };
+
+    const created = await ordersRepo.createOrder(order);
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: created.buyerId, userName: created.buyerName, userRole: 'buyer', action: 'placed order', targetId: created.id, targetType: 'order', timestamp: new Date().toISOString() });
+
+    try {
+      const notif = {
+        id: uuidv4(),
+        userId: created.farmerId,
+        type: 'order',
+        title: 'New order received',
+        message: `${created.buyerName} placed an order for ${created.productName}`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        actionUrl: '/orders'
+      };
+      const nf = await notificationsRepo.createNotification(notif);
+      if (io) io.to(`user_${created.farmerId}`).emit('notification:new', nf);
+      if (io) io.to(`user_${created.farmerId}`).emit('order:placed', created);
+    } catch (e) { console.error('[Orders] Error notifying farmer of new order:', e && e.message ? e.message : e); }
+
+    try {
+      if (!created.buyerEmail) console.error('[Orders] Missing buyerEmail for order', created.id);
+      if (!created.farmerEmail) console.error('[Orders] Missing farmerEmail for order', created.id);
+      if (created.buyerEmail && created.farmerEmail) {
+        console.log('[Orders] Triggering sendOrderPlacementEmails for', created.id);
+        void sendOrderPlacementEmails(created);
+      } else {
+        console.warn('[Orders] Skipping email sends due to missing email addresses for order', created.id);
+      }
+    } catch (e) { console.error('[Orders] Failed to trigger order emails for', created.id, e); }
+
+    return res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to create order', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to create order' });
+  }
 });
 
 // Messages
-app.get('/api/messages', (req, res) => res.json(messages));
-app.post('/api/messages', (req, res) => {
-  const incoming = normalizeMessage(req.body || {});
-  const sender = users.find((entry) => entry.id === incoming.senderId);
-  const idx = messages.findIndex((entry) => entry.id === incoming.id);
-
-  if (idx >= 0) {
-    messages[idx] = { ...messages[idx], ...incoming };
-    saveData(MESSAGES_FILE, messages);
-    return res.status(200).json(messages[idx]);
-  }
-
-  messages.push(incoming);
-  saveData(MESSAGES_FILE, messages);
-  activityLogs.unshift({
-    id: uuidv4(),
-    userId: incoming.senderId,
-    userName: incoming.senderName,
-    userRole: sender?.role || 'buyer',
-    action: 'sent message',
-    targetId: incoming.id,
-    targetType: 'message',
-    details: `To ${incoming.recipientName}`,
-    timestamp: new Date().toISOString(),
-  });
-  saveData(ACTIVITY_FILE, activityLogs);
-  // Create a notification for recipient
+app.get('/api/messages', async (req, res) => {
   try {
-    const notif = {
-      id: uuidv4(),
-      userId: incoming.recipientId,
-      type: 'message',
-      title: `New message from ${incoming.senderName}`,
-      message: incoming.content.substring(0, 240),
-      timestamp: incoming.timestamp || new Date().toISOString(),
-      read: false,
-      actionUrl: '/messages'
-    };
-    notifications.unshift(notif);
-    saveNotifications(notifications);
-    if (io) io.to(`user_${incoming.recipientId}`).emit('notification:new', notif);
-    if (io) io.to(`user_${incoming.recipientId}`).emit('message:new', incoming);
-  } catch (e) {}
-
-  res.status(201).json(incoming);
+    const list = (await messagesRepo.getAllMessages()).map(normalizeMessage);
+    return res.json(list);
+  } catch (e) {
+    console.error('[API] Failed to fetch messages', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to fetch messages' });
+  }
 });
-app.put('/api/messages/:id', (req, res) => {
-  const idx = messages.findIndex((entry) => entry.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Message not found' });
 
-  messages[idx] = normalizeMessage({ ...messages[idx], ...req.body, id: messages[idx].id });
-  saveData(MESSAGES_FILE, messages);
-  res.json(messages[idx]);
+app.post('/api/messages', async (req, res) => {
+  try {
+    const incoming = normalizeMessage(req.body || {});
+    const sender = incoming.senderId ? await usersRepo.getUserById(incoming.senderId) : null;
+
+    const existing = incoming.id ? await messagesRepo.getMessageById(incoming.id) : null;
+    if (existing) {
+      const updated = await messagesRepo.updateMessage(incoming.id, incoming);
+      return res.status(200).json(updated);
+    }
+
+    const created = await messagesRepo.createMessage(incoming);
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: incoming.senderId, userName: incoming.senderName, userRole: sender?.role || 'buyer', action: 'sent message', targetId: created.id, targetType: 'message', details: `To ${incoming.recipientName}`, timestamp: new Date().toISOString() });
+
+    // Create a notification for recipient
+    try {
+      const notif = {
+        id: uuidv4(),
+        userId: incoming.recipientId,
+        type: 'message',
+        title: `New message from ${incoming.senderName}`,
+        message: incoming.content.substring(0, 240),
+        timestamp: incoming.timestamp || new Date().toISOString(),
+        read: false,
+        actionUrl: '/messages'
+      };
+      await notificationsRepo.createNotification(notif);
+      if (io) io.to(`user_${incoming.recipientId}`).emit('notification:new', notif);
+      if (io) io.to(`user_${incoming.recipientId}`).emit('message:new', created);
+    } catch (e) { console.warn('[Messages] Failed to create/emit notification', e && e.message ? e.message : e); }
+
+    return res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to create message', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to create message' });
+  }
 });
-app.delete('/api/messages/:id', (req, res) => {
-  const idx = messages.findIndex((entry) => entry.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Message not found' });
 
-  const removed = messages.splice(idx, 1)[0];
-  const sender = users.find((entry) => entry.id === removed.senderId);
-  saveData(MESSAGES_FILE, messages);
-  activityLogs.unshift({
-    id: uuidv4(),
-    userId: removed.senderId,
-    userName: removed.senderName,
-    userRole: sender?.role || 'buyer',
-    action: 'deleted message',
-    targetId: removed.id,
-    targetType: 'message',
-    details: `To ${removed.recipientName}`,
-    timestamp: new Date().toISOString(),
-  });
-  saveData(ACTIVITY_FILE, activityLogs);
-  res.json({ success: true });
+app.put('/api/messages/:id', async (req, res) => {
+  try {
+    const existing = await messagesRepo.getMessageById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Message not found' });
+    const updated = await messagesRepo.updateMessage(req.params.id, { ...existing, ...req.body });
+    return res.json(updated);
+  } catch (e) {
+    console.error('[API] Failed to update message', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to update message' });
+  }
+});
+
+app.delete('/api/messages/:id', async (req, res) => {
+  try {
+    const existing = await messagesRepo.getMessageById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Message not found' });
+    await messagesRepo.deleteMessage(req.params.id);
+    const sender = existing.senderId ? await usersRepo.getUserById(existing.senderId) : null;
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: existing.senderId, userName: existing.senderName, userRole: sender?.role || 'buyer', action: 'deleted message', targetId: existing.id, targetType: 'message', details: `To ${existing.recipientName}`, timestamp: new Date().toISOString() });
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[API] Failed to delete message', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to delete message' });
+  }
 });
 
 // Auth: login
-app.post('/api/auth/login', (req, res) => {
-  const email = (req.body?.email || '').trim().toLowerCase();
-  const password = req.body?.password || '';
-  const user = users.find((u) => (u.email || '').trim().toLowerCase() === email);
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-
-  if (!user.passwordHash || !user.passwordSalt) {
-    return res.status(401).json({ error: 'No password set for this account' });
-  }
-
+app.post('/api/auth/login', async (req, res) => {
   try {
-    const derived = crypto.scryptSync(password, user.passwordSalt, 64).toString('hex');
-    if (derived !== user.passwordHash) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    const email = normalizeEmail(req.body?.email);
+    const password = req.body?.password || '';
+    const user = await usersRepo.findByEmail(email);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    if (!user.passwordHash || !user.passwordSalt) return res.status(401).json({ error: 'No password set for this account' });
+
+    try {
+      const derived = (await scryptAsync(password, user.passwordSalt, 64)).toString('hex');
+      if (derived !== user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
+    } catch (e) { return res.status(500).json({ error: 'Unable to verify credentials' }); }
+
+    const safe = { ...user };
+    delete safe.passwordHash; delete safe.passwordSalt; delete safe.resetPasswordHash; delete safe.resetPasswordExpiry;
+    try { await activityRepo.addActivityLog({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'logged in', targetType: 'auth', timestamp: new Date().toISOString() }); } catch (e) { console.warn('Failed to log login activity', e && e.message ? e.message : e); }
+    console.log('[Auth] LOGIN SUCCESS', user.email, user.id);
+    return res.json(safe);
   } catch (e) {
-    return res.status(500).json({ error: 'Unable to verify credentials' });
+    console.error('[Auth] LOGIN FAILED', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to process login' });
   }
-
-  // Successful login - return sanitized user
-  const safe = { ...user };
-  delete safe.passwordHash;
-  delete safe.passwordSalt;
-  delete safe.resetPasswordHash;
-  delete safe.resetPasswordExpiry;
-
-  activityLogs.unshift({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'logged in', targetType: 'auth', timestamp: new Date().toISOString() });
-  saveData(ACTIVITY_FILE, activityLogs);
-
-  res.json(safe);
 });
 
 // Auth: request password reset
 app.post('/api/auth/forgot', async (req, res) => {
-  const email = (req.body?.email || '').trim().toLowerCase();
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required' });
-  }
-
-  const user = users.find((u) => (u.email || '').trim().toLowerCase() === email);
-
-  // Always respond success to avoid user enumeration
-  if (!user) {
-    return res.json({ success: true });
-  }
-
-  // Generate token and store its hash
-  const token = crypto.randomBytes(32).toString('hex');
-  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-  user.resetPasswordHash = tokenHash;
-  user.resetPasswordExpiry = Date.now() + (60 * 60 * 1000); // 1 hour
-  saveData(USERS_FILE, users);
-
-  const frontendBase = getFrontendBase(req);
-  const resetLink = `${frontendBase}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
-
-  // Try to send email via Brevo API if configured, otherwise log
-  let emailed = false;
   try {
-    emailed = await sendPasswordResetEmail({ email, resetLink });
-  } catch (e) {
-    console.warn('Failed to send reset email via SMTP, falling back to console log', e && e.message ? e.message : e);
-  }
+    const email = normalizeEmail(req.body?.email);
+    if (!email) return res.status(400).json({ error: 'Email is required' });
 
-  if (!emailed) {
-    // Log only for debugging purposes when SMTP not available
-    if ((process.env.NODE_ENV || 'development') === 'development') {
-      console.log(`[DEV] Password reset link for ${email} (check email first, this is fallback)`);
-    }
-  }
+    const user = await usersRepo.findByEmail(email);
+    // Always respond success to avoid user enumeration
+    if (!user) return res.json({ success: true });
 
-  // SECURITY: Never return reset token in response
-  res.json({ success: true });
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await usersRepo.updateUser(user.id, { resetPasswordHash: tokenHash, resetPasswordExpiry: Date.now() + (60 * 60 * 1000) });
+
+    const frontendBase = getFrontendBase(req);
+    const resetLink = `${frontendBase}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
+
+    let emailed = false;
+    try { emailed = await sendPasswordResetEmail({ email, resetLink }); } catch (e) { console.warn('Failed to send reset email', e && e.message ? e.message : e); }
+
+    if (!emailed && (process.env.NODE_ENV || 'development') === 'development') console.log(`[DEV] Password reset link for ${email}: ${resetLink}`);
+    return res.json({ success: true });
+  } catch (e) { console.error('[API] Forgot password error', e && e.message ? e.message : e); return res.json({ success: true }); }
 });
 
 // Auth: reset password using token
-app.post('/api/auth/reset', (req, res) => {
-  const { email, token, password } = req.body || {};
-  if (!email || !token || !password) {
-    return res.status(400).json({ error: 'Email, token and new password are required' });
-  }
-
-  // Validate password complexity: min 8 chars, upper, lower, number
-  if (!String(password).match(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/)) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters with uppercase, lowercase, and numbers' });
-  }
-
-  const user = users.find((u) => (u.email || '').trim().toLowerCase() === String(email).trim().toLowerCase());
-  if (!user || !user.resetPasswordHash || !user.resetPasswordExpiry) {
-    return res.status(400).json({ error: 'Invalid or expired token' });
-  }
-
-  if (Date.now() > Number(user.resetPasswordExpiry)) {
-    return res.status(400).json({ error: 'Token has expired' });
-  }
-
-  const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
-  if (tokenHash !== user.resetPasswordHash) {
-    return res.status(400).json({ error: 'Invalid token' });
-  }
-
-  // Set new password
+app.post('/api/auth/reset', async (req, res) => {
   try {
-    const salt = crypto.randomBytes(16).toString('hex');
-    const derived = crypto.scryptSync(String(password), salt, 64).toString('hex');
-    user.passwordSalt = salt;
-    user.passwordHash = derived;
-    delete user.resetPasswordHash;
-    delete user.resetPasswordExpiry;
-    saveData(USERS_FILE, users);
+    const { email, token, password } = req.body || {};
+    if (!email || !token || !password) return res.status(400).json({ error: 'Email, token and new password are required' });
+    if (!String(password).match(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/)) return res.status(400).json({ error: 'Password must be at least 8 characters with uppercase, lowercase, and numbers' });
 
-    activityLogs.unshift({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'reset password', targetType: 'auth', timestamp: new Date().toISOString() });
-    saveData(ACTIVITY_FILE, activityLogs);
+    const user = await usersRepo.findByEmail(String(email).trim().toLowerCase());
+    if (!user || !user.resetPasswordHash || !user.resetPasswordExpiry) return res.status(400).json({ error: 'Invalid or expired token' });
+    if (Date.now() > Number(user.resetPasswordExpiry)) return res.status(400).json({ error: 'Token has expired' });
+
+    const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
+    if (tokenHash !== user.resetPasswordHash) return res.status(400).json({ error: 'Invalid token' });
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = (await scryptAsync(String(password), salt, 64)).toString('hex');
+    await usersRepo.updateUser(user.id, { passwordSalt: salt, passwordHash: derived, resetPasswordHash: null, resetPasswordExpiry: null });
+    try { await activityRepo.addActivityLog({ id: uuidv4(), userId: user.id, userName: user.name, userRole: user.role, action: 'reset password', targetType: 'auth', timestamp: new Date().toISOString() }); } catch (e) { console.warn('Failed to log password reset activity', e && e.message ? e.message : e); }
 
     return res.json({ success: true });
-  } catch (e) {
-    return res.status(500).json({ error: 'Unable to set new password' });
-  }
+  } catch (e) { console.error('[API] Password reset error', e && e.message ? e.message : e); return res.status(500).json({ error: 'Unable to set new password' }); }
 });
 
 // Update an order (partial updates allowed)
-app.put('/api/orders/:id', (req, res) => {
-  const idx = orders.findIndex((o) => o.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Order not found' });
-
-  const previous = { ...orders[idx] };
-
-  // Merge updates
-  orders[idx] = { ...orders[idx], ...req.body };
-  saveData(ORDERS_FILE, orders);
-  const updated = orders[idx];
-
-  const statusChanged = String(previous.status || '') !== String(updated.status || '');
-  const deliveryStatusChanged = String(previous.deliveryStatus || '') !== String(updated.deliveryStatus || '');
-  if (statusChanged || deliveryStatusChanged) {
-    try {
-      console.log('[Orders] Status changed for order', updated.id, 'previous:', { status: previous.status, deliveryStatus: previous.deliveryStatus }, 'updated:', { status: updated.status, deliveryStatus: updated.deliveryStatus });
-      console.log('[Orders] Triggering order status email for', updated.id);
-      void sendOrderStatusEmailToBuyer(updated);
-    } catch (e) {
-      console.error('[Orders] Failed to trigger status email for', updated.id, e);
-    }
-  }
-
-  // Log activity (best-effort)
+app.put('/api/orders/:id', async (req, res) => {
   try {
-    const existing = orders[idx];
-    activityLogs.unshift({
-      id: uuidv4(),
-      userId: req.body.userId || existing.farmerId || existing.buyerId || 'system',
-      userName: req.body.userName || existing.farmerName || existing.buyerName || 'System',
-      userRole: req.body.userRole || 'farmer',
-      action: 'updated order',
-      targetId: existing.id,
-      targetType: 'order',
-      details: `Order updated: ${(req.body.status ? `status -> ${req.body.status}` : JSON.stringify(req.body))}`,
-      timestamp: new Date().toISOString(),
-    });
-    saveData(ACTIVITY_FILE, activityLogs);
-  } catch (e) {
-    console.warn('Failed to log activity for order update', e);
-  }
+    const id = req.params.id;
+    const previous = await ordersRepo.getOrderById(id);
+    if (!previous) return res.status(404).json({ error: 'Order not found' });
 
-  res.json(updated);
+    const updated = await ordersRepo.updateOrder(id, req.body);
+
+    const statusChanged = String(previous.status || '') !== String(updated.status || '');
+    const deliveryStatusChanged = String(previous.deliveryStatus || '') !== String(updated.deliveryStatus || '');
+    if (statusChanged || deliveryStatusChanged) {
+      try { console.log('[Orders] Status changed for order', updated.id, 'previous:', { status: previous.status, deliveryStatus: previous.deliveryStatus }, 'updated:', { status: updated.status, deliveryStatus: updated.deliveryStatus }); void sendOrderStatusEmailToBuyer(updated); } catch (e) { console.error('[Orders] Failed to trigger status email for', updated.id, e); }
+    }
+
+    try { if (io) io.to(`user_${updated.buyerId}`).emit('order:update', updated); } catch (e) { console.warn('[Orders] emit update failed', e && e.message ? e.message : e); }
+
+    try {
+      await activityRepo.addActivityLog({ id: uuidv4(), userId: req.body.userId || updated.farmerId || updated.buyerId || 'system', userName: req.body.userName || updated.farmerName || updated.buyerName || 'System', userRole: req.body.userRole || 'farmer', action: 'updated order', targetId: updated.id, targetType: 'order', details: `Order updated: ${(req.body.status ? `status -> ${req.body.status}` : JSON.stringify(req.body))}`, timestamp: new Date().toISOString() });
+    } catch (e) { console.warn('Failed to log activity for order update', e); }
+
+    return res.json(updated);
+  } catch (e) {
+    console.error('[API] Failed to update order', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to update order' });
+  }
 });
 
-app.get('/api/activity', (req,res)=> res.json(activityLogs));
-app.post('/api/activity', (req,res)=>{
-  const entry = { id: uuidv4(), ...req.body, timestamp: req.body.timestamp ?? new Date().toISOString() };
-  activityLogs.unshift(entry);
-  saveData(ACTIVITY_FILE, activityLogs);
-  res.status(201).json(entry);
+app.get('/api/activity', async (req, res) => {
+  try {
+    const list = await activityRepo.getAllActivityLogs();
+    return res.json(list);
+  } catch (e) {
+    console.error('[API] Failed to fetch activity logs', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to fetch activity logs' });
+  }
+});
+
+app.post('/api/activity', async (req, res) => {
+  try {
+    const entry = { id: uuidv4(), ...req.body, timestamp: req.body.timestamp ?? new Date().toISOString() };
+    const created = await activityRepo.addActivityLog(entry);
+    return res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to add activity log', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to add activity log' });
+  }
 });
 
 // Helper: send wish to a set of users (or all active users)
-function sendWish(message, targetUserIds) {
+async function sendWish(message, targetUserIds) {
+  const all = await usersRepo.getAllUsers();
   const targets = Array.isArray(targetUserIds) && targetUserIds.length > 0
-    ? users.filter(u => targetUserIds.includes(u.id))
-    : users.filter(u => u.isActive);
+    ? all.filter(u => targetUserIds.includes(u.id))
+    : all.filter(u => u.isActive);
 
   const entries = [];
-  targets.forEach(u => {
+  for (const u of targets) {
     const e = {
       id: uuidv4(),
       userId: u.id,
@@ -874,19 +785,20 @@ function sendWish(message, targetUserIds) {
       channel: 'in-app',
       timestamp: new Date().toISOString(),
     };
-    activityLogs.unshift(e);
+    try { await activityRepo.addActivityLog(e); } catch (err) { console.warn('[AutoWish] failed to log activity', err && err.message ? err.message : err); }
     entries.push(e);
-  });
-  saveData(ACTIVITY_FILE, activityLogs);
+  }
   return entries;
 }
 
 // API: trigger an immediate wish (POST body: { message?, userIds? })
-app.post('/api/wish/send-now', (req, res) => {
-  const message = typeof req.body?.message === 'string' && req.body.message.trim().length > 0 ? req.body.message : AUTO_WISH_MESSAGE;
-  const userIds = Array.isArray(req.body?.userIds) ? req.body.userIds : null;
-  const entries = sendWish(message, userIds);
-  res.json({ sent: entries.length, entries });
+app.post('/api/wish/send-now', async (req, res) => {
+  try {
+    const message = typeof req.body?.message === 'string' && req.body.message.trim().length > 0 ? req.body.message : AUTO_WISH_MESSAGE;
+    const userIds = Array.isArray(req.body?.userIds) ? req.body.userIds : null;
+    const entries = await sendWish(message, userIds);
+    return res.json({ sent: entries.length, entries });
+  } catch (e) { console.error('[API] Failed to send wish', e && e.message ? e.message : e); return res.status(500).json({ error: 'Unable to send wishes' }); }
 });
 
 // Scheduler: compute milliseconds until next scheduled hour/minute
@@ -903,19 +815,19 @@ function scheduleAutoWish() {
   const delay = msUntilNext(AUTO_WISH_HOUR, AUTO_WISH_MINUTE);
   console.log(`Auto-wish: scheduled first run in ${Math.round(delay/1000)}s at ${AUTO_WISH_HOUR}:${String(AUTO_WISH_MINUTE).padStart(2,'0')}`);
   setTimeout(() => {
-    try {
-      const sent = sendWish(AUTO_WISH_MESSAGE);
-      console.log(`Auto-wish: sent ${sent.length} wishes at ${new Date().toISOString()}`);
-    } catch (err) {
-      console.error('Auto-wish error:', err);
-    }
-    // schedule subsequent runs every 24h
-    setInterval(() => {
+    (async () => {
       try {
-        const sent = sendWish(AUTO_WISH_MESSAGE);
+        const sent = await sendWish(AUTO_WISH_MESSAGE);
         console.log(`Auto-wish: sent ${sent.length} wishes at ${new Date().toISOString()}`);
       } catch (err) { console.error('Auto-wish error:', err); }
-    }, 24 * 60 * 60 * 1000);
+      // schedule subsequent runs every 24h
+      setInterval(async () => {
+        try {
+          const sent = await sendWish(AUTO_WISH_MESSAGE);
+          console.log(`Auto-wish: sent ${sent.length} wishes at ${new Date().toISOString()}`);
+        } catch (err) { console.error('Auto-wish error:', err); }
+      }, 24 * 60 * 60 * 1000);
+    })();
   }, delay);
 }
 
@@ -957,137 +869,136 @@ app.get('/', (req, res) => {
 });
 
 // Notifications API
-app.get('/api/notifications', (req, res) => {
-  const userId = req.query.userId ? String(req.query.userId) : null;
-  if (userId) return res.json(notifications.filter(n => n.userId === userId));
-  return res.json(notifications);
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const userId = req.query.userId ? String(req.query.userId) : null;
+    const list = await notificationsRepo.getAllNotifications(userId);
+    return res.json(list);
+  } catch (e) {
+    console.error('[API] Failed to fetch notifications', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to fetch notifications' });
+  }
 });
 
-app.get('/api/notifications/unread-count', (req, res) => {
-  const userId = req.query.userId ? String(req.query.userId) : null;
-  if (!userId) return res.status(400).json({ error: 'userId required' });
-  const count = notifications.filter(n => n.userId === userId && !n.read).length;
-  res.json({ unread: count });
+app.get('/api/notifications/unread-count', async (req, res) => {
+  try {
+    const userId = req.query.userId ? String(req.query.userId) : null;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const list = await notificationsRepo.getAllNotifications(userId);
+    const count = list.filter(n => !n.read).length;
+    return res.json({ unread: count });
+  } catch (e) {
+    console.error('[API] Failed to fetch unread count', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to fetch unread count' });
+  }
 });
 
-app.post('/api/notifications', (req, res) => {
-  const incoming = {
-    id: uuidv4(),
-    userId: String(req.body.userId || ''),
-    type: String(req.body.type || 'update'),
-    title: String(req.body.title || ''),
-    message: String(req.body.message || ''),
-    timestamp: req.body.timestamp || new Date().toISOString(),
-    read: Boolean(req.body.read || false),
-    actionUrl: req.body.actionUrl || null,
-  };
-  // Prevent obvious duplicates: same userId + type + title within 2 seconds
-  const now = Date.now();
-  const dup = notifications.find(n => n.userId === incoming.userId && n.type === incoming.type && n.title === incoming.title && Math.abs(new Date(n.timestamp).getTime() - now) < 2000);
-  if (dup) return res.status(409).json({ error: 'duplicate' });
+app.post('/api/notifications', async (req, res) => {
+  try {
+    const incoming = {
+      id: uuidv4(),
+      userId: String(req.body.userId || ''),
+      type: String(req.body.type || 'update'),
+      title: String(req.body.title || ''),
+      message: String(req.body.message || ''),
+      timestamp: req.body.timestamp || new Date().toISOString(),
+      read: Boolean(req.body.read || false),
+      actionUrl: req.body.actionUrl || null,
+    };
+    // Prevent obvious duplicates by checking recent notifications for user
+    const now = Date.now();
+    const recent = await notificationsRepo.getAllNotifications(incoming.userId);
+    const dup = recent.find(n => n.type === incoming.type && n.title === incoming.title && Math.abs(new Date(n.timestamp).getTime() - now) < 2000);
+    if (dup) return res.status(409).json({ error: 'duplicate' });
 
-  notifications.unshift(incoming);
-  saveNotifications(notifications);
-  // Emit via socket if available
-  try { if (io) io.to(`user_${incoming.userId}`).emit('notification:new', incoming); } catch (e) {}
-  res.status(201).json(incoming);
+    const created = await notificationsRepo.createNotification(incoming);
+    try { if (io) io.to(`user_${created.userId}`).emit('notification:new', created); } catch (e) { console.warn('[Notifications] emit failed', e && e.message ? e.message : e); }
+    return res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to create notification', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to create notification' });
+  }
 });
 
 // Buyer cancels an order (allowed only before shipping/out-for-delivery/delivered)
-app.post('/api/orders/:id/cancel', (req, res) => {
-  const id = req.params.id;
-  const idx = orders.findIndex((o) => o.id === id);
-  if (idx < 0) return res.status(404).json({ error: 'Order not found' });
-
-  const existing = orders[idx];
-  // Disallow cancel if already shipped/out-for-delivery or delivered
-  const disallowedDeliveryStatuses = ['out-for-delivery', 'delivered'];
-  const disallowedOrderStatuses = ['shipped', 'delivered', 'cancelled'];
-
-  if (disallowedDeliveryStatuses.includes(String(existing.deliveryStatus)) || disallowedOrderStatuses.includes(String(existing.status))) {
-    return res.status(400).json({ error: 'Order cannot be cancelled after shipping or delivery' });
-  }
-
-  // Apply cancellation
-  orders[idx] = {
-    ...existing,
-    status: 'cancelled',
-    deliveryStatus: 'cancelled',
-  };
-
-  // If payment was made, mark paymentStatus to 'refunded' (best-effort simulation)
+app.post('/api/orders/:id/cancel', async (req, res) => {
   try {
-    if (orders[idx].paymentStatus === 'paid') {
-      orders[idx].paymentStatus = 'refunded';
+    const id = req.params.id;
+    const existing = await ordersRepo.getOrderById(id);
+    if (!existing) return res.status(404).json({ error: 'Order not found' });
+
+    const disallowedDeliveryStatuses = ['out-for-delivery', 'delivered'];
+    const disallowedOrderStatuses = ['shipped', 'delivered', 'cancelled'];
+    if (disallowedDeliveryStatuses.includes(String(existing.deliveryStatus)) || disallowedOrderStatuses.includes(String(existing.status))) {
+      return res.status(400).json({ error: 'Order cannot be cancelled after shipping or delivery' });
     }
-  } catch (e) {}
 
-  saveData(ORDERS_FILE, orders);
+    const updates = { status: 'cancelled', deliveryStatus: 'cancelled' };
+    try { if (existing.paymentStatus === 'paid') updates.paymentStatus = 'refunded'; } catch (e) {}
 
-  try {
-    const entry = { id: uuidv4(), userId: orders[idx].buyerId, userName: orders[idx].buyerName, userRole: 'buyer', action: 'cancelled order', targetId: orders[idx].id, targetType: 'order', timestamp: new Date().toISOString() };
-    activityLogs.unshift(entry);
-    saveData(ACTIVITY_FILE, activityLogs);
-  } catch (e) {}
+    const updated = await ordersRepo.updateOrder(id, updates);
+    await activityRepo.addActivityLog({ id: uuidv4(), userId: updated.buyerId, userName: updated.buyerName, userRole: 'buyer', action: 'cancelled order', targetId: updated.id, targetType: 'order', timestamp: new Date().toISOString() });
 
-  // Notify farmer and buyer
-  try {
-    const notifToFarmer = {
-      id: uuidv4(),
-      userId: orders[idx].farmerId,
-      type: 'order',
-      title: 'Order cancelled by buyer',
-      message: `${orders[idx].buyerName} cancelled order ${orders[idx].id} for ${orders[idx].productName}`,
-      timestamp: new Date().toISOString(),
-      read: false,
-      actionUrl: '/orders'
-    };
+    try {
+      const notifToFarmer = {
+        id: uuidv4(),
+        userId: updated.farmerId,
+        type: 'order',
+        title: 'Order cancelled by buyer',
+        message: `${updated.buyerName} cancelled order ${updated.id} for ${updated.productName}`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        actionUrl: '/orders'
+      };
 
-    const notifToBuyer = {
-      id: uuidv4(),
-      userId: orders[idx].buyerId,
-      type: 'order',
-      title: 'Order cancelled',
-      message: `Your order ${orders[idx].id} was cancelled successfully.`,
-      timestamp: new Date().toISOString(),
-      read: false,
-      actionUrl: '/orders'
-    };
+      const notifToBuyer = {
+        id: uuidv4(),
+        userId: updated.buyerId,
+        type: 'order',
+        title: 'Order cancelled',
+        message: `Your order ${updated.id} was cancelled successfully.`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        actionUrl: '/orders'
+      };
 
-    notifications.unshift(notifToFarmer);
-    notifications.unshift(notifToBuyer);
-    saveNotifications(notifications);
+      const nf1 = await notificationsRepo.createNotification(notifToFarmer);
+      const nf2 = await notificationsRepo.createNotification(notifToBuyer);
+      if (io) {
+        io.to(`user_${nf1.userId}`).emit('notification:new', nf1);
+        io.to(`user_${nf2.userId}`).emit('notification:new', nf2);
+        io.to(`user_${updated.farmerId}`).emit('order:cancelled', updated);
+        io.to(`user_${updated.buyerId}`).emit('order:cancelled', updated);
+      }
+    } catch (e) { console.warn('Failed to emit cancellation notifications', e && e.message ? e.message : e); }
 
-    if (io) {
-      io.to(`user_${orders[idx].farmerId}`).emit('notification:new', notifToFarmer);
-      io.to(`user_${orders[idx].buyerId}`).emit('notification:new', notifToBuyer);
-      // Emit order cancelled event for real-time UI updates
-      io.to(`user_${orders[idx].farmerId}`).emit('order:cancelled', orders[idx]);
-      io.to(`user_${orders[idx].buyerId}`).emit('order:cancelled', orders[idx]);
-    }
+    return res.json(updated);
   } catch (e) {
-    console.warn('Failed to emit cancellation notifications', e && e.message ? e.message : e);
+    console.error('[API] Failed to cancel order', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Unable to cancel order' });
   }
-
-  res.json(orders[idx]);
 });
 
-app.put('/api/notifications/:id', (req, res) => {
-  const idx = notifications.findIndex(n => n.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Not found' });
-  notifications[idx] = { ...notifications[idx], ...req.body };
-  saveNotifications(notifications);
-  try { if (io) io.to(`user_${notifications[idx].userId}`).emit('notification:update', notifications[idx]); } catch (e) {}
-  res.json(notifications[idx]);
+app.put('/api/notifications/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const existing = await notificationsRepo.getNotificationById(id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const updated = await notificationsRepo.updateNotification(id, req.body);
+    try { if (io) io.to(`user_${updated.userId}`).emit('notification:update', updated); } catch (e) { console.warn('[Notifications] emit update failed', e && e.message ? e.message : e); }
+    return res.json(updated);
+  } catch (e) { console.error('[API] Failed to update notification', e && e.message ? e.message : e); return res.status(500).json({ error: 'Unable to update notification' }); }
 });
 
-app.delete('/api/notifications/:id', (req, res) => {
-  const idx = notifications.findIndex(n => n.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Not found' });
-  const removed = notifications.splice(idx,1)[0];
-  saveNotifications(notifications);
-  try { if (io) io.to(`user_${removed.userId}`).emit('notification:delete', { id: removed.id }); } catch (e) {}
-  res.json({ success: true });
+app.delete('/api/notifications/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const existing = await notificationsRepo.getNotificationById(id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    await notificationsRepo.deleteNotification(id);
+    try { if (io) io.to(`user_${existing.userId}`).emit('notification:delete', { id: existing.id }); } catch (e) { console.warn('[Notifications] emit delete failed', e && e.message ? e.message : e); }
+    return res.json({ success: true });
+  } catch (e) { console.error('[API] Failed to delete notification', e && e.message ? e.message : e); return res.status(500).json({ error: 'Unable to delete notification' }); }
 });
 
 // Upgrade to HTTP server with Socket.IO
@@ -1148,54 +1059,17 @@ app.get('/api/debug/otp-config', (req, res) => {
 });
 
 async function loadFromFirestore() {
-  // If USE_FIRESTORE is not enabled, keep legacy local JSON behaviour
+  // Enforce Firestore as the single source of truth.
   if (process.env.USE_FIRESTORE !== 'true') {
-    users = loadData(USERS_FILE);
-    products = loadData(PRODUCTS_FILE);
-    orders = loadData(ORDERS_FILE);
-    messages = loadData(MESSAGES_FILE).map(normalizeMessage);
-    activityLogs = loadData(ACTIVITY_FILE);
-    notifications = loadNotifications();
-    otps = loadOtps();
+    console.warn('[Startup] USE_FIRESTORE!=true — server running without Firestore is not supported in this deployment. No local JSON will be read or written.');
     return;
   }
-
   try {
-    // Load collections from Firestore
-    users = await usersRepo.getAllUsers();
-    if (!Array.isArray(users) || users.length === 0) {
-      const adminUser = {
-        id: 'admin_primary',
-        name: 'Platform Admin',
-        email: 'admin@platform.local',
-        role: 'admin',
-        location: 'HQ',
-        phone: '',
-        isActive: true,
-        joinedDate: new Date().toISOString(),
-      };
-      users = [adminUser];
-      try { await usersRepo.setAllUsers(users); } catch (e) { console.warn('[Firestore] failed to ensure admin user', e && e.message ? e.message : e); }
-    }
-
-    products = await productsRepo.getAllProducts();
-    orders = await ordersRepo.getAllOrders();
-    messages = (await messagesRepo.getAllMessages()).map(normalizeMessage);
-    activityLogs = await activityRepo.getAllActivityLogs();
-    notifications = await notificationsRepo.getAllNotifications();
-    otps = await otpsRepo.getAllOtps();
-
+    // Firestore mode: do NOT preload entire collections on startup.
+    // Repositories will fetch data on demand to avoid heavy reads and accidental overwrites.
     console.log('[Firestore] Data loaded from Firestore');
   } catch (e) {
-    console.error('[Firestore] Failed to load data - not falling back to local files (USE_FIRESTORE=true):', e && e.message ? e.message : e);
-    // Do not fall back to JSON files when Firestore mode is required.
-    users = [];
-    products = [];
-    orders = [];
-    messages = [];
-    activityLogs = [];
-    notifications = [];
-    otps = [];
+    console.error('[Firestore] Initialization check failed:', e && e.message ? e.message : e);
   }
 }
 

@@ -1,6 +1,10 @@
 const { db, admin } = require('../config/firebase');
 const { serializeData } = require('../services/firebaseService');
 
+function _log(op, collection, details) {
+  try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch (e) {}
+}
+
 async function addReview(productId, review) {
   if (!db) throw new Error('Firebase not initialized');
   const productRef = db.collection('products').doc(String(productId));
@@ -32,6 +36,8 @@ async function addReview(productId, review) {
     return { id: reviewRef.id, ...serializeData(reviewData) };
   });
 
+  _log('WRITE', 'reviews', `productId=${productId}`);
+  _log('UPDATE', 'products', `productId=${productId} ratings updated`);
   return result;
 }
 

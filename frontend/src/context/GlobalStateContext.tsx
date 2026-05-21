@@ -76,18 +76,6 @@ export interface User {
   createdAt?: string;
 }
 
-const defaultAdminUser: User = {
-  id: 'admin_primary',
-  name: 'Platform Admin',
-  email: 'admin@platform.local',
-  phone: '',
-  location: 'HQ',
-  role: 'admin',
-  isActive: true,
-  loginCount: 0,
-  createdAt: new Date().toISOString(),
-};
-
 const isUserRole = (value: unknown): value is UserRole => {
   return value === 'farmer' || value === 'buyer' || value === 'admin';
 };
@@ -159,6 +147,31 @@ const sanitizeUserForStorage = (user: User): User => ({
       }
     : user.buyerOnboarding,
   profilePhoto: user.profilePhoto,
+});
+
+const normalizeUserRecord = (user: Partial<User> & { id?: string; email?: string; name?: string; phone?: string; location?: string; role?: UserRole }): User => ({
+  id: String(user.id || ''),
+  name: String(user.name || ''),
+  email: String(user.email || '').trim().toLowerCase(),
+  phone: String(user.phone || ''),
+  location: String(user.location || ''),
+  role: isUserRole(user.role) ? user.role : 'buyer',
+  isActive: user.isActive,
+  lastLoginAt: user.lastLoginAt,
+  loginCount: user.loginCount,
+  profilePhoto: user.profilePhoto,
+  farmName: user.farmName,
+  cropTypes: Array.isArray(user.cropTypes) ? user.cropTypes : undefined,
+  paymentDetails: user.paymentDetails,
+  farmDetails: user.farmDetails,
+  farmerOnboarding: user.farmerOnboarding,
+  buyerOnboarding: user.buyerOnboarding,
+  createdAt: user.createdAt,
+});
+
+const normalizeNotificationRecord = (notification: { id: string; userId: string; type: string; title: string; message: string; timestamp: string; read: boolean; actionUrl?: string | null }): AppNotification => ({
+  ...notification,
+  type: notification.type === 'order' || notification.type === 'message' ? notification.type : 'update',
 });
 
 const safeSetLocalStorageItem = (key: string, value: unknown) => {
@@ -236,10 +249,6 @@ export interface AppNotification {
   actionUrl?: string;
 }
 
-const defaultNotifications: AppNotification[] = [];
-
-const defaultMessages: Message[] = [];
-
 const normalizeMessage = (message: Message): Message => ({
   ...message,
   id: String(message.id),
@@ -254,54 +263,6 @@ const normalizeMessage = (message: Message): Message => ({
 
 const normalizeMessages = (messages: Message[]) => messages.map(normalizeMessage);
 
-const mergeMessages = (localMessages: Message[], remoteMessages: Message[]) => {
-  const merged = new Map<string, Message>();
-
-  normalizeMessages(remoteMessages).forEach((message) => {
-    merged.set(message.id, message);
-  });
-
-  normalizeMessages(localMessages).forEach((message) => {
-    const existing = merged.get(message.id);
-    if (!existing) {
-      merged.set(message.id, message);
-      return;
-    }
-
-    merged.set(message.id, {
-      ...existing,
-      ...message,
-      read: existing.read || message.read,
-    });
-  });
-
-  return Array.from(merged.values()).sort(
-    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
-  );
-};
-
-const isSameMessage = (left: Message, right: Message) =>
-  left.id === right.id &&
-  left.senderId === right.senderId &&
-  left.senderName === right.senderName &&
-  left.recipientId === right.recipientId &&
-  left.recipientName === right.recipientName &&
-  left.content === right.content &&
-  left.timestamp === right.timestamp &&
-  left.read === right.read;
-
-const areMessageListsEqual = (left: Message[], right: Message[]) => {
-  if (left === right) {
-    return true;
-  }
-
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((message, index) => isSameMessage(message, right[index]));
-};
-
 export interface GlobalStateContextType {
   // Auth
   currentUser: User | null;
@@ -312,7 +273,7 @@ export interface GlobalStateContextType {
   logout: () => void;
   setCurrentUser: (user: User | null) => void;
   setSelectedRole: (role: UserRole | null) => void;
-  upsertUser: (user: User) => void;
+  upsertUser: (user: User) => Promise<User>;
   updateUser: (userId: string, updates: Partial<User>) => void;
   deleteUser: (userId: string) => void;
   blockUser: (userId: string) => void;
@@ -412,12 +373,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   });
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [users, setUsers] = useState<User[]>([defaultAdminUser]);
+  const [users, setUsers] = useState<User[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const storedMessages = readStoredValue<Message[]>('messages') ?? defaultMessages;
-    return normalizeMessages(storedMessages);
-  });
+  const [messages, setMessages] = useState<Message[]>([]);
 
   const normalizeFavoriteIds = (ids: string[]) => Array.from(new Set(ids.filter(Boolean)));
 
@@ -431,102 +389,42 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   });
 
   useEffect(() => {
+    let cancelled = false;
+
     const loadData = async () => {
       try {
-        const [fetchedUsers, fetchedProducts, fetchedOrders, fetchedActivity, fetchedNotifications, fetchedMessages] = await Promise.all([
+        const [fetchedUsers, fetchedProducts, fetchedOrders, fetchedActivity, fetchedMessages] = await Promise.all([
           api.fetchUsers(),
           api.fetchProducts(),
           api.fetchOrders(),
           api.fetchActivityLogs(),
-          Promise.resolve([]), // notifications loaded per-user below
           api.fetchMessages(),
         ]);
 
-        const storedMessages = normalizeMessages(readStoredValue<Message[]>('messages') ?? defaultMessages);
-        const remoteMessageIds = new Set(fetchedMessages.map((message) => message.id));
-        const missingMessages = storedMessages.filter((message) => !remoteMessageIds.has(message.id));
+        if (cancelled) return;
 
-        if (missingMessages.length > 0) {
-          void Promise.all(missingMessages.map((message) => api.createMessage(message))).catch((error) => {
-            console.error('Failed to sync local messages to backend', error);
-          });
+        setUsers(fetchedUsers.map(normalizeUserRecord));
+        setProducts(fetchedProducts.map(normalizeProduct));
+        setOrders(fetchedOrders.map(normalizeOrder));
+        setActivityLogs(fetchedActivity);
+        setMessages(normalizeMessages(fetchedMessages));
+
+        if (currentUser) {
+          const latestUser = fetchedUsers.find((entry) => entry.id === currentUser.id);
+          if (latestUser) {
+            setCurrentUserState(normalizeUserRecord(latestUser));
+          }
         }
-
-        setUsers(fetchedUsers.length > 0 ? fetchedUsers : [defaultAdminUser]);
-        setProducts((prev) => {
-          if (fetchedProducts.length === 0 && prev.length > 0) {
-            return prev;
-          }
-          return fetchedProducts.map(normalizeProduct);
-        });
-        setOrders((prev) => {
-          if (fetchedOrders.length === 0 && prev.length > 0) {
-            return prev;
-          }
-          return fetchedOrders.map(normalizeOrder);
-        });
-        setActivityLogs((prev) => {
-          if (fetchedActivity.length === 0 && prev.length > 0) {
-            return prev;
-          }
-          return fetchedActivity;
-        });
-        setNotifications(fetchedNotifications);
-        setMessages((prev) => {
-          const merged = mergeMessages(prev.length > 0 ? prev : storedMessages, fetchedMessages);
-          if (areMessageListsEqual(prev, merged)) {
-            return prev;
-          }
-
-          safeSetLocalStorageItem('messages', merged);
-          return merged;
-        });
       } catch (error) {
         console.error('Unable to load remote data', error);
       }
     };
 
-    loadData();
+    void loadData();
 
-    const isJsonEqual = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-
-    const poll = setInterval(async () => {
-      try {
-        const [productsData, usersData, ordersData, activityData, messagesData] = await Promise.all([
-          api.fetchProducts(),
-          api.fetchUsers(),
-          api.fetchOrders(),
-          api.fetchActivityLogs(),
-          api.fetchMessages(),
-        ]);
-
-        const updatedProducts = productsData.map(normalizeProduct);
-        setProducts((prev) => (isJsonEqual(prev, updatedProducts) ? prev : updatedProducts));
-
-        setUsers((prev) => {
-          const nextUsers = usersData.length > 0 ? usersData : [defaultAdminUser];
-          return isJsonEqual(prev, nextUsers) ? prev : nextUsers;
-        });
-
-        const updatedOrders = ordersData.map(normalizeOrder);
-        setOrders((prev) => (isJsonEqual(prev, updatedOrders) ? prev : updatedOrders));
-
-        setActivityLogs((prev) => (isJsonEqual(prev, activityData) ? prev : activityData));
-        setMessages((prev) => {
-          const merged = mergeMessages(prev, messagesData);
-          if (areMessageListsEqual(prev, merged)) {
-            return prev;
-          }
-
-          safeSetLocalStorageItem('messages', merged);
-          return merged;
-        });
-      } catch (e) {
-        console.warn('Polling error', e);
-      }
-    }, 8000);
-
-    return () => clearInterval(poll);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Load notifications for current user when they log in
@@ -535,7 +433,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       try {
         if (!currentUser) return;
         const fetched = await api.fetchNotifications(currentUser.id);
-        setNotifications(fetched);
+        setNotifications(fetched.map(normalizeNotificationRecord));
       } catch (e) {
         console.warn('Failed to load notifications for user', e);
       }
@@ -543,6 +441,71 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
     void loadForUser();
   }, [currentUser]);
+
+  useEffect(() => {
+    const socketInstance = socket.initSocket();
+
+    const handleOrderPlaced = (orderPayload: Order) => {
+      const nextOrder = normalizeOrder(orderPayload);
+      setOrders((prev) => (prev.some((order) => order.id === nextOrder.id) ? prev : [nextOrder, ...prev]));
+    };
+
+    const handleOrderUpdate = (orderPayload: Order) => {
+      const nextOrder = normalizeOrder(orderPayload);
+      setOrders((prev) => prev.map((order) => (order.id === nextOrder.id ? nextOrder : order)));
+    };
+
+    const handleOrderCancelled = (orderPayload: Order) => {
+      const nextOrder = normalizeOrder(orderPayload);
+      setOrders((prev) => prev.map((order) => (order.id === nextOrder.id ? nextOrder : order)));
+    };
+
+    const handleMessageNew = (messagePayload: Message) => {
+      const nextMessage = normalizeMessage(messagePayload);
+      setMessages((prev) => (prev.some((message) => message.id === nextMessage.id) ? prev : [...prev, nextMessage]));
+    };
+
+    const handleNotificationNew = (notificationPayload: AppNotification) => {
+      const nextNotification = normalizeNotificationRecord(notificationPayload);
+      setNotifications((prev) => (prev.some((notification) => notification.id === nextNotification.id) ? prev : [nextNotification, ...prev]));
+    };
+
+    const handleNotificationUpdate = (notificationPayload: AppNotification) => {
+      const nextNotification = normalizeNotificationRecord(notificationPayload);
+      setNotifications((prev) => prev.map((notification) => (notification.id === nextNotification.id ? nextNotification : notification)));
+    };
+
+    const handleNotificationDelete = ({ id }: { id: string }) => {
+      setNotifications((prev) => prev.filter((notification) => notification.id !== id));
+    };
+
+    socket.on('order:placed', handleOrderPlaced);
+    socket.on('order:update', handleOrderUpdate);
+    socket.on('order:cancelled', handleOrderCancelled);
+    socket.on('message:new', handleMessageNew);
+    socket.on('notification:new', handleNotificationNew);
+    socket.on('notification:update', handleNotificationUpdate);
+    socket.on('notification:delete', handleNotificationDelete);
+
+    return () => {
+      socket.off('order:placed', handleOrderPlaced);
+      socket.off('order:update', handleOrderUpdate);
+      socket.off('order:cancelled', handleOrderCancelled);
+      socket.off('message:new', handleMessageNew);
+      socket.off('notification:new', handleNotificationNew);
+      socket.off('notification:update', handleNotificationUpdate);
+      socket.off('notification:delete', handleNotificationDelete);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      return;
+    }
+
+    socket.joinUserRoom(currentUser.id);
+    return () => socket.leaveUserRoom(currentUser.id);
+  }, [currentUser?.id]);
 
   const notifyAdmins = useCallback((
     title: string,
@@ -555,73 +518,28 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       return;
     }
 
-    setNotifications((prev) => {
+    void (async () => {
       const timestamp = new Date().toISOString();
-      const adminNotifications: AppNotification[] = adminUsers.map((adminUser, index) => ({
-        id: `${idPrefix}_${Date.now()}_${adminUser.id}_${index}`,
-        userId: adminUser.id,
-        type: 'update',
-        title,
-        message: messageBuilder(adminUser.id, index),
-        timestamp,
-        read: false,
-        actionUrl,
-      }));
-
-      const updated = [...adminNotifications, ...prev];
-      localStorage.setItem('notifications', JSON.stringify(updated));
-      return updated;
-    });
+      try {
+        const savedNotifications = await Promise.all(adminUsers.map(async (adminUser, index) => normalizeNotificationRecord(await api.createNotificationApi({
+          userId: adminUser.id,
+          type: 'update',
+          title,
+          message: messageBuilder(adminUser.id, index),
+          timestamp,
+          read: false,
+          actionUrl,
+        }))));
+        setNotifications((prev) => [...savedNotifications, ...prev]);
+      } catch (error) {
+        console.error('Failed to persist admin notifications', error);
+      }
+    })();
   }, [users]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       if (!event.key) {
-        return;
-      }
-
-      if (event.key === 'products') {
-        const nextProducts = readStoredValue<Product[]>('products') ?? [];
-        setProducts(nextProducts.map(normalizeProduct));
-        return;
-      }
-
-      if (event.key === 'orders') {
-        const nextOrders = readStoredValue<Order[]>('orders') ?? [];
-        setOrders(nextOrders.map(normalizeOrder));
-        return;
-      }
-
-      if (event.key === 'messages') {
-        const nextMessages = readStoredValue<Message[]>('messages') ?? [];
-        setMessages((prev) => (areMessageListsEqual(prev, nextMessages) ? prev : nextMessages));
-        return;
-      }
-
-      if (event.key === 'notifications') {
-        const nextNotifications = readStoredValue<AppNotification[]>('notifications') ?? [];
-        setNotifications(nextNotifications);
-        return;
-      }
-
-      if (event.key === 'activityLogs') {
-        const nextActivityLogs = readStoredValue<ActivityLog[]>('activityLogs') ?? [];
-        setActivityLogs(nextActivityLogs);
-        return;
-      }
-
-      if (event.key === 'users') {
-        const nextUsers = readStoredValue<User[]>('users') ?? [];
-        setUsers(nextUsers);
-
-        setCurrentUserState((prev) => {
-          if (!prev) {
-            return prev;
-          }
-
-          const refreshedUser = nextUsers.find((entry) => entry.id === prev.id);
-          return refreshedUser ?? prev;
-        });
         return;
       }
 
@@ -639,48 +557,6 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, []);
-
-  // Periodic sync of products, users, orders, and activity from backend API
-  useEffect(() => {
-    const pollData = async () => {
-      try {
-        const [fetchedUsers, fetchedProducts, fetchedOrders, fetchedActivity] = await Promise.all([
-          api.fetchUsers(),
-          api.fetchProducts(),
-          api.fetchOrders(),
-          api.fetchActivityLogs(),
-        ]);
-
-        setUsers(fetchedUsers.length > 0 ? fetchedUsers : [defaultAdminUser]);
-        setProducts((prev) => {
-          // Avoid flicker from transient empty responses while user already has products in view.
-          if (fetchedProducts.length === 0 && prev.length > 0) {
-            return prev;
-          }
-          return fetchedProducts.map(normalizeProduct);
-        });
-        setOrders((prev) => {
-          if (fetchedOrders.length === 0 && prev.length > 0) {
-            return prev;
-          }
-          return fetchedOrders.map(normalizeOrder);
-        });
-        setActivityLogs((prev) => {
-          if (fetchedActivity.length === 0 && prev.length > 0) {
-            return prev;
-          }
-          return fetchedActivity;
-        });
-      } catch (error) {
-        console.warn('Poll failed to fetch remote data', error);
-      }
-    };
-
-    pollData();
-    const pollInterval = setInterval(pollData, 3000);
-
-    return () => clearInterval(pollInterval);
   }, []);
 
   const setCurrentUser = useCallback((user: User | null) => {
@@ -748,9 +624,13 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
       let savedUser: User;
       if (existing) {
-        savedUser = await api.updateUser(user.id, user as Partial<User>);
+        savedUser = normalizeUserRecord(await api.updateUser(user.id, user as any));
       } else {
-        savedUser = await api.createUser(user as Omit<User, 'id'>);
+        const payload = {
+          ...user,
+          joinedDate: user.createdAt ?? new Date().toISOString(),
+        } as any;
+        savedUser = normalizeUserRecord(await api.createUser(payload));
       }
 
       setUsers((prev) => {
@@ -782,6 +662,8 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
           details: `${savedUser.role} account created`,
         });
       }
+
+      return savedUser;
     } catch (error) {
       console.error('Failed to upsert user', error);
       throw error;
@@ -871,7 +753,6 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         if (!updated.some((user) => user.id === userId)) {
           updated.unshift(normalizedUser);
         }
-        safeSetLocalStorageItem('users', updated.map(sanitizeUserForStorage));
         return updated;
       });
 
@@ -897,13 +778,11 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   const removeUserFromState = useCallback((userId: string) => {
     setUsers((prev) => {
       const updated = prev.filter((user) => user.id !== userId);
-      localStorage.setItem('users', JSON.stringify(updated));
       return updated;
     });
 
     setProducts((prev) => {
       const updated = prev.filter((product) => product.farmerId !== userId);
-      safeSetLocalStorageItem('products', updated);
       return updated;
     });
 
@@ -911,7 +790,6 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       const updated = prev.filter(
         (order) => order.buyerId !== userId && order.farmerId !== userId
       );
-      localStorage.setItem('orders', JSON.stringify(updated));
       return updated;
     });
 
@@ -1214,15 +1092,10 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
           });
         });
 
-        safeSetLocalStorageItem('products', updated);
         return updated;
       });
 
-      setOrders((prev) => {
-        const updated = [...prev, savedOrder];
-        safeSetLocalStorageItem('orders', updated);
-        return updated;
-      });
+      setOrders((prev) => [...prev, savedOrder]);
 
       const notificationTimestamp = new Date().toISOString();
       const buyerNotification: AppNotification = {
@@ -1247,14 +1120,25 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         actionUrl: '/orders',
       };
 
-      addNotification(farmerNotification);
+      try {
+        const savedFarmerNotification = await api.createNotificationApi(farmerNotification);
+        setNotifications((prev) => [normalizeNotificationRecord(savedFarmerNotification), ...prev]);
+      } catch (error) {
+        console.error('Failed to persist farmer notification', error);
+      }
+
       if (currentUser.id !== productInState.farmerId) {
-        addNotification(buyerNotification);
+        try {
+          const savedBuyerNotification = await api.createNotificationApi(buyerNotification);
+          setNotifications((prev) => [normalizeNotificationRecord(savedBuyerNotification), ...prev]);
+        } catch (error) {
+          console.error('Failed to persist buyer notification', error);
+        }
       }
 
       return savedOrder;
     },
-    [addNotification, currentUser, products]
+    [currentUser, products]
   );
 
   const checkoutCart = useCallback(
@@ -1304,16 +1188,20 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
       clearCart();
 
-      addNotification({
-        id: `notification_checkout_${Date.now()}`,
-        userId: currentUser.id,
-        type: 'order',
-        title: 'Checkout confirmed',
-        message: `Order confirmed with ${checkout.paymentMethod.toUpperCase()} payment.`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        actionUrl: '/orders',
-      });
+      try {
+        const checkoutNotification = await api.createNotificationApi({
+          userId: currentUser.id,
+          type: 'order',
+          title: 'Checkout confirmed',
+          message: `Order confirmed with ${checkout.paymentMethod.toUpperCase()} payment.`,
+          timestamp: new Date().toISOString(),
+          read: false,
+          actionUrl: '/orders',
+        });
+        setNotifications((prev) => [normalizeNotificationRecord(checkoutNotification), ...prev]);
+      } catch (error) {
+        console.error('Failed to persist checkout notification', error);
+      }
 
       return {
         success: true,
@@ -1330,9 +1218,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       if (prev.some((existing) => existing.id === order.id)) {
         return prev;
       }
-      const updated = [...prev, normalizeOrder(order)];
-      localStorage.setItem('orders', JSON.stringify(updated));
-      return updated;
+      return [...prev, normalizeOrder(order)];
     });
   }, []);
 
@@ -1352,20 +1238,11 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
       });
     }
 
-    // Optimistic update locally so UI updates immediately
-    setOrders((prev) => {
-      const updated = prev.map((o) => (o.id === id ? normalizeOrder({ ...o, ...updates }) : o));
-      localStorage.setItem('orders', JSON.stringify(updated));
-      return updated;
-    });
-
-    // Persist change to backend (best-effort). Update local state with server response when available.
     void (async () => {
       try {
         const saved = await api.updateOrderApi(id, updates);
         setOrders((prev) => {
           const updated = prev.map((o) => (o.id === id ? normalizeOrder(saved) : o));
-          localStorage.setItem('orders', JSON.stringify(updated));
           return updated;
         });
       } catch (err) {
@@ -1375,11 +1252,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   }, [addActivityLog, currentUser, orders]);
 
   const deleteOrder = useCallback((id: string) => {
-    setOrders((prev) => {
-      const updated = prev.filter((o) => o.id !== id);
-      localStorage.setItem('orders', JSON.stringify(updated));
-      return updated;
-    });
+    setOrders((prev) => prev.filter((o) => o.id !== id));
   }, []);
 
   const getOrderById = useCallback(
@@ -1399,65 +1272,47 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
 
   // Message operations
   const addMessage = useCallback((message: Message) => {
-        const sender = users.find((entry) => entry.id === message.senderId);
-        addActivityLog({
-          userId: message.senderId,
-          userName: sender?.name ?? message.senderName,
+    void (async () => {
+      try {
+        const savedMessage = normalizeMessage(await api.createMessage(message));
+        const sender = users.find((entry) => entry.id === savedMessage.senderId);
+        await addActivityLog({
+          userId: savedMessage.senderId,
+          userName: sender?.name ?? savedMessage.senderName,
           userRole: sender?.role ?? 'buyer',
           action: 'sent message',
           targetType: 'message',
-          targetId: message.id,
-          details: `To ${message.recipientName}`,
+          targetId: savedMessage.id,
+          details: `To ${savedMessage.recipientName}`,
         });
-    setMessages((prev) => {
-      const normalizedMessage = normalizeMessage(message);
 
-      if (prev.some((existingMessage) => isSameMessage(existingMessage, normalizedMessage))) {
-        return prev;
+        setMessages((prev) => (prev.some((existingMessage) => existingMessage.id === savedMessage.id) ? prev : [...prev, savedMessage]));
+
+        const notification = normalizeNotificationRecord(await api.createNotificationApi({
+          userId: savedMessage.recipientId,
+          type: 'message',
+          title: `New message from ${savedMessage.senderName}`,
+          message: savedMessage.content,
+          timestamp: savedMessage.timestamp,
+          read: false,
+          actionUrl: '/messages',
+        }));
+        setNotifications((prev) => [notification, ...prev]);
+      } catch (error) {
+        console.error('Failed to persist message', error);
       }
-
-      const updated = [...prev, normalizedMessage];
-      localStorage.setItem('messages', JSON.stringify(updated));
-      return updated;
-    });
-
-    void api.createMessage(message).catch((error) => {
-      console.error('Failed to persist message', error);
-    });
-
-    addNotification({
-      id: `notification_${Date.now()}_message`,
-      userId: message.recipientId,
-      type: 'message',
-      title: `New message from ${message.senderName}`,
-      message: message.content,
-      timestamp: message.timestamp,
-      read: false,
-      actionUrl: '/messages',
-    });
+    })();
   }, [addActivityLog, addNotification, users]);
 
   const updateMessage = useCallback((messageId: string, updates: Partial<Message>) => {
-    setMessages((prev) => {
-      const updated = prev.map((message) => {
-        if (message.id !== messageId) {
-          return message;
-        }
-
-        return normalizeMessage({ ...message, ...updates, id: message.id });
-      });
-
-      if (areMessageListsEqual(prev, updated)) {
-        return prev;
+    void (async () => {
+      try {
+        const savedMessage = normalizeMessage(await api.updateMessageApi(messageId, updates));
+        setMessages((prev) => prev.map((message) => (message.id === messageId ? savedMessage : message)));
+      } catch (error) {
+        console.error('Failed to update message', error);
       }
-
-      localStorage.setItem('messages', JSON.stringify(updated));
-      return updated;
-    });
-
-    void api.updateMessageApi(messageId, updates).catch((error) => {
-      console.error('Failed to update message', error);
-    });
+    })();
   }, []);
 
   const getMessagesByUser = useCallback(
@@ -1479,41 +1334,26 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   );
 
   const markMessagesAsRead = useCallback((messageIds: string[]) => {
-    setMessages((prev) => {
-      const targetIds = new Set(messageIds);
-      const hasUnreadTargets = prev.some((message) => targetIds.has(message.id) && !message.read);
-
-      if (!hasUnreadTargets) {
-        return prev;
+    void (async () => {
+      try {
+        await Promise.all(messageIds.map((messageId) => api.updateMessageApi(messageId, { read: true })));
+        const targetIds = new Set(messageIds);
+        setMessages((prev) => prev.map((message) => (targetIds.has(message.id) ? { ...message, read: true } : message)));
+      } catch (error) {
+        console.error('Failed to persist read state', error);
       }
-
-      const updated = prev.map((m) =>
-        targetIds.has(m.id) ? { ...m, read: true } : m
-      );
-      localStorage.setItem('messages', JSON.stringify(updated));
-      return updated;
-    });
-
-    void Promise.all(messageIds.map((messageId) => api.updateMessageApi(messageId, { read: true }))).catch((error) => {
-      console.error('Failed to persist read state', error);
-    });
+    })();
   }, []);
 
   const deleteMessage = useCallback((messageId: string) => {
-    setMessages((prev) => {
-      const updated = prev.filter((message) => message.id !== messageId);
-
-      if (updated.length === prev.length) {
-        return prev;
+    void (async () => {
+      try {
+        await api.deleteMessageApi(messageId);
+        setMessages((prev) => prev.filter((message) => message.id !== messageId));
+      } catch (error) {
+        console.error('Failed to delete message', error);
       }
-
-      localStorage.setItem('messages', JSON.stringify(updated));
-      return updated;
-    });
-
-    void api.deleteMessageApi(messageId).catch((error) => {
-      console.error('Failed to delete message', error);
-    });
+    })();
   }, []);
 
   const getUnreadMessageCount = useCallback(
@@ -1528,40 +1368,33 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   );
 
   const markNotificationAsRead = useCallback((notificationId: string) => {
-    setNotifications((prev) => {
-      const updated = prev.map((notification) =>
-        notification.id === notificationId ? { ...notification, read: true } : notification
-      );
-      localStorage.setItem('notifications', JSON.stringify(updated));
-      return updated;
-    });
-    void api.updateNotificationApi(notificationId, { read: true }).catch((error) => {
-      console.error('Failed to persist notification read state', error);
-    });
+    void (async () => {
+      try {
+        const saved = normalizeNotificationRecord(await api.updateNotificationApi(notificationId, { read: true }));
+        setNotifications((prev) => prev.map((notification) => (notification.id === notificationId ? saved : notification)));
+      } catch (error) {
+        console.error('Failed to persist notification read state', error);
+      }
+    })();
   }, []);
 
   const deleteNotification = useCallback((notificationId: string) => {
-    setNotifications((prev) => {
-      const updated = prev.filter((notification) => notification.id !== notificationId);
-      localStorage.setItem('notifications', JSON.stringify(updated));
-      return updated;
-    });
-    void api.deleteNotificationApi(notificationId).catch((error) => {
-      console.error('Failed to delete notification', error);
-    });
+    void (async () => {
+      try {
+        await api.deleteNotificationApi(notificationId);
+        setNotifications((prev) => prev.filter((notification) => notification.id !== notificationId));
+      } catch (error) {
+        console.error('Failed to delete notification', error);
+      }
+    })();
   }, []);
 
   const clearNotificationsForUser = useCallback((userId: string) => {
-    setNotifications((prev) => {
-      const updated = prev.filter((notification) => notification.userId !== userId);
-      localStorage.setItem('notifications', JSON.stringify(updated));
-      return updated;
-    });
-    // Mark remote notifications as read for this user
     void (async () => {
       try {
         const list = await api.fetchNotifications(userId);
         await Promise.all(list.map((n) => api.updateNotificationApi(n.id, { read: true })));
+        setNotifications((prev) => prev.filter((notification) => notification.userId !== userId));
       } catch (e) {
         console.warn('Failed to clear remote notifications', e);
       }

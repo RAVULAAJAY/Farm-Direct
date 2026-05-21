@@ -1,15 +1,24 @@
 const { db, admin } = require('../config/firebase');
 const { serializeData, setCollectionFromArray } = require('../services/firebaseService');
 
+function _log(op, collection, details) {
+  try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch (e) {}
+}
+
 async function getAllActivityLogs() {
   if (!db) return [];
   const snap = await db.collection('activityLogs').orderBy('timestamp', 'desc').get();
-  return snap.docs.map(d => ({ id: d.id, ...serializeData(d.data()) }));
+  const out = snap.docs.map(d => ({ id: d.id, ...serializeData(d.data()) }));
+  _log('READ', 'activityLogs', `count=${out.length}`);
+  return out;
 }
 
 async function setAllActivityLogs(items) {
+  if (String(process.env.ALLOW_BULK_SET || '').toLowerCase() !== 'true') throw new Error('Bulk set disabled. Set ALLOW_BULK_SET=true to enable.');
   if (!db) throw new Error('Firebase not initialized');
-  return setCollectionFromArray('activityLogs', items);
+  const res = await setCollectionFromArray('activityLogs', items);
+  _log('WRITE', 'activityLogs', `bulk=${Array.isArray(items) ? items.length : 'unknown'}`);
+  return res;
 }
 
 async function addActivityLog(log) {
@@ -20,7 +29,9 @@ async function addActivityLog(log) {
   delete data.id;
   await coll.doc(id).set(data);
   const doc = await coll.doc(id).get();
-  return { id: doc.id, ...serializeData(doc.data()) };
+  const out = { id: doc.id, ...serializeData(doc.data()) };
+  _log('WRITE', 'activityLogs', `id=${out.id}`);
+  return out;
 }
 
 module.exports = {
