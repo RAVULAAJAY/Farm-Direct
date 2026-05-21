@@ -1,6 +1,20 @@
 {
+  "name": "farm-direct",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node backend/server.cjs",
+    "dev": "node backend/server.cjs"
+  },
   "dependencies": {
     "@getbrevo/brevo": "^5.0.4",
-    "dotenv": "^17.4.2"
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.10.0",
+    "socket.io": "^4.8.3",
+    "uuid": "^14.0.0"
   }
 }
