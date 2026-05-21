@@ -331,7 +331,7 @@ async function handleLogin(req, res) {
 
     const token = createAuthToken(user);
     console.log('[Auth] LOGIN SUCCESS', user.id);
-    return res.json({ success: true, user, token });
+    return res.json({ success: true, user: stripAuthFields(user), token });
   } catch (error) {
     console.error('[Auth] Login error:', error && error.message ? error.message : error);
     return res.status(500).json({ success: false, message: 'Internal server error' });
@@ -362,7 +362,7 @@ async function handleSignup(req, res) {
     const userRecord = await usersRepo.createUser({ name, email, password, role, isActive: true, createdAt: new Date().toISOString() });
     const token = createAuthToken(userRecord);
     console.log('[Auth] SIGNUP SUCCESS', userRecord.id);
-    return res.status(201).json({ success: true, user: userRecord, token });
+    return res.status(201).json({ success: true, user: stripAuthFields(userRecord), token });
   } catch (err) {
     console.error('[Auth] SIGNUP FAILED', err && err.message ? err.message : err);
     return res.status(500).json({ success: false, message: 'Signup failed' });
@@ -426,10 +426,198 @@ function sendJsonError(res, status, message, details) {
   });
 }
 
+function stripAuthFields(user) {
+  if (!user || typeof user !== 'object') return user;
+  const { password, passwordHash, passwordSalt, hashedPassword, resetPasswordHash, resetPasswordExpiry, ...rest } = user;
+  return rest;
+}
+
 app.post(['/api/auth/login', '/login'], handleLogin);
 app.post(['/api/auth/signup', '/signup'], handleSignup);
 app.post(['/api/auth/send-otp', '/send-otp'], handleSendOtp);
 app.post(['/api/auth/verify-otp', '/verify-otp'], handleVerifyOtp);
+app.post('/api/users', handleSignup);
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await usersRepo.getAllUsers();
+    return res.json(users.map(stripAuthFields));
+  } catch (e) {
+    console.error('[API] Failed to fetch users', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to fetch users');
+  }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+  try {
+    const updated = await usersRepo.updateUser(req.params.id, req.body);
+    return res.json(stripAuthFields(updated));
+  } catch (e) {
+    console.error('[API] Failed to update user', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to update user');
+  }
+});
+
+app.get('/api/products', async (req, res) => {
+  try {
+    return res.json(await productsRepo.getAllProducts());
+  } catch (e) {
+    console.error('[API] Failed to fetch products', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to fetch products');
+  }
+});
+
+app.get('/api/products/:id', async (req, res) => {
+  try {
+    const product = await productsRepo.getProductById(req.params.id);
+    if (!product) return sendJsonError(res, 404, 'Product not found');
+    return res.json(product);
+  } catch (e) {
+    console.error('[API] Failed to fetch product', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to fetch product');
+  }
+});
+
+app.post('/api/products', async (req, res) => {
+  try {
+    const created = await productsRepo.createProduct(req.body || {});
+    return res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to create product', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to create product');
+  }
+});
+
+app.put('/api/products/:id', async (req, res) => {
+  try {
+    const updated = await productsRepo.updateProduct(req.params.id, req.body || {});
+    return res.json(updated);
+  } catch (e) {
+    console.error('[API] Failed to update product', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to update product');
+  }
+});
+
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    await productsRepo.deleteProduct(req.params.id);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[API] Failed to delete product', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to delete product');
+  }
+});
+
+app.post('/api/products/:id/reviews', async (req, res) => {
+  try {
+    await reviewsRepo.addReview(req.params.id, req.body || {});
+    const updatedProduct = await productsRepo.getProductById(req.params.id);
+    if (!updatedProduct) return sendJsonError(res, 404, 'Product not found');
+    return res.json(updatedProduct);
+  } catch (e) {
+    if (String(e && e.message ? e.message : '').toLowerCase().includes('product not found')) {
+      return sendJsonError(res, 404, 'Product not found');
+    }
+    console.error('[API] Failed to add product review', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to add review');
+  }
+});
+
+app.get('/api/messages', async (req, res) => {
+  try {
+    return res.json(await messagesRepo.getAllMessages());
+  } catch (e) {
+    console.error('[API] Failed to fetch messages', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to fetch messages');
+  }
+});
+
+app.get('/api/messages/:id', async (req, res) => {
+  try {
+    const message = await messagesRepo.getMessageById(req.params.id);
+    if (!message) return sendJsonError(res, 404, 'Message not found');
+    return res.json(message);
+  } catch (e) {
+    console.error('[API] Failed to fetch message', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to fetch message');
+  }
+});
+
+app.post('/api/messages', async (req, res) => {
+  try {
+    const created = await messagesRepo.createMessage(req.body || {});
+    try {
+      if (io && created?.recipientId) io.to(`user_${created.recipientId}`).emit('message:new', created);
+    } catch (e) {
+      console.warn('[Messages] emit failed', e && e.message ? e.message : e);
+    }
+    return res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to create message', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to create message');
+  }
+});
+
+app.put('/api/messages/:id', async (req, res) => {
+  try {
+    const updated = await messagesRepo.updateMessage(req.params.id, req.body || {});
+    try {
+      if (io && updated?.recipientId) io.to(`user_${updated.recipientId}`).emit('message:update', updated);
+    } catch (e) {
+      console.warn('[Messages] emit update failed', e && e.message ? e.message : e);
+    }
+    return res.json(updated);
+  } catch (e) {
+    console.error('[API] Failed to update message', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to update message');
+  }
+});
+
+app.delete('/api/messages/:id', async (req, res) => {
+  try {
+    await messagesRepo.deleteMessage(req.params.id);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[API] Failed to delete message', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to delete message');
+  }
+});
+
+app.get('/api/orders', async (req, res) => {
+  try {
+    return res.json(await ordersRepo.getAllOrders());
+  } catch (e) {
+    console.error('[API] Failed to fetch orders', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to fetch orders');
+  }
+});
+
+app.get('/api/orders/:id', async (req, res) => {
+  try {
+    const order = await ordersRepo.getOrderById(req.params.id);
+    if (!order) return sendJsonError(res, 404, 'Order not found');
+    return res.json(order);
+  } catch (e) {
+    console.error('[API] Failed to fetch order', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to fetch order');
+  }
+});
+
+app.post('/api/orders', async (req, res) => {
+  try {
+    const created = await ordersRepo.createOrder(req.body || {});
+    try {
+      if (io && created?.buyerId) io.to(`user_${created.buyerId}`).emit('order:placed', created);
+      if (io && created?.farmerId) io.to(`user_${created.farmerId}`).emit('order:placed', created);
+    } catch (e) {
+      console.warn('[Orders] emit create failed', e && e.message ? e.message : e);
+    }
+    return res.status(201).json(created);
+  } catch (e) {
+    console.error('[API] Failed to create order', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to create order');
+  }
+});
 
 // Auth: request password reset
 app.post('/api/auth/forgot', async (req, res) => {
@@ -775,7 +963,13 @@ const server = http.createServer(app);
 let io;
 try {
   const { Server } = require('socket.io');
-  io = new Server(server, { cors: { origin: allowedOrigin, methods: ['GET', 'POST'], credentials: true } });
+  io = new Server(server, {
+    cors: { origin: allowedOrigin, methods: ['GET', 'POST'], credentials: true },
+    transports: ['polling', 'websocket'],
+    pingInterval: 25000,
+    pingTimeout: 60000,
+    connectTimeout: 45000,
+  });
 
   io.on('connection', (socket) => {
     socket.on('join', (data) => {

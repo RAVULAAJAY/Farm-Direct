@@ -2,7 +2,10 @@ import { io, Socket } from 'socket.io-client';
 
 // Default to the deployed backend unless an explicit Vite env override is provided.
 const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? 'https://farm-direct-api.onrender.com/api';
-const SERVER = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '');
+const normalizedApiBase = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
+const SERVER = /^https:\/\/farm-direct-api\.onrender\.com\/api$/i.test(normalizedApiBase)
+  ? normalizedApiBase.replace(/\/api\/?$/, '')
+  : 'https://farm-direct-api.onrender.com';
 
 // Log socket configuration (development only)
 if (import.meta.env.DEV) {
@@ -22,12 +25,15 @@ export function initSocket() {
   try {
     console.log('[Socket] Initializing connection to:', SERVER);
     socket = io(SERVER, {
-      transports: ['websocket', 'polling'],
+      path: '/socket.io',
+      transports: ['polling', 'websocket'],
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 5,
+      timeout: 20000,
+      withCredentials: true,
     });
 
     socket.on('connect', () => {

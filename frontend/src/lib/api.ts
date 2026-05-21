@@ -3,7 +3,10 @@ import { Product, ProductReview, User, Order, Message } from '@/lib/data';
 // Default to the deployed backend unless an explicit Vite env override is provided.
 const defaultApiBase = 'https://farm-direct-api.onrender.com/api';
 const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? defaultApiBase;
-const API_BASE = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
+const normalizedApiBase = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
+const API_BASE = /^https:\/\/farm-direct-api\.onrender\.com\/api$/i.test(normalizedApiBase)
+  ? normalizedApiBase
+  : defaultApiBase;
 
 // Log API configuration (development only)
 if (import.meta.env.DEV) {
