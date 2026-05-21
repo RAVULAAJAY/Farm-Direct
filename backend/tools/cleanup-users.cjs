@@ -8,19 +8,15 @@ function normalizeEmail(email) {
 }
 
 function scoreUser(user) {
-  const password = typeof user.password === 'string' ? user.password : '';
-  const passwordHash = typeof user.passwordHash === 'string' ? user.passwordHash : '';
-  const passwordSalt = typeof user.passwordSalt === 'string' ? user.passwordSalt : '';
   const updatedAt = Date.parse(user.updatedAt || user.createdAt || user.joinedDate || '') || 0;
 
-  const isBcrypt = password.startsWith('$2');
-  const isPlain = password.length > 0 && !password.startsWith('$2');
-  const isScrypt = Boolean(passwordHash && passwordSalt && !passwordHash.startsWith('$2'));
-
   return {
-    rank: isBcrypt ? 3 : isPlain ? 2 : isScrypt ? 1 : 0,
     updatedAt,
   };
+}
+
+function isBcryptPassword(value) {
+  return typeof value === 'string' && value.startsWith('$2');
 }
 
 async function main() {
@@ -62,7 +58,7 @@ async function main() {
     return;
   }
 
-  let deletedCount = 0;
+  let inactivatedCount = 0;
   let updatedCount = 0;
 
   for (const [email, items] of grouped.entries()) {
@@ -77,17 +73,22 @@ async function main() {
     const duplicates = sorted.slice(1);
 
     if (duplicates.length > 0) {
-      console.log(`[Cleanup] ${email}: keeping ${keeper.id}, deleting ${duplicates.map((item) => item.id).join(', ')}`);
+      console.log(`[Cleanup] ${email}: keeping ${keeper.id}, inactivating ${duplicates.map((item) => item.id).join(', ')}`);
       const batch = db.batch();
       for (const duplicate of duplicates) {
-        batch.delete(db.collection('users').doc(duplicate.id));
-        deletedCount += 1;
+        batch.set(db.collection('users').doc(duplicate.id), {
+          isActive: false,
+          supersededBy: keeper.id,
+          archivedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        inactivatedCount += 1;
       }
       await batch.commit();
     }
 
     const password = typeof keeper.password === 'string' ? keeper.password : '';
-    const isBcrypt = password.startsWith('$2');
+    const isBcrypt = isBcryptPassword(password);
 
     if (isBcrypt) {
       const cleaned = sanitizeFirestoreData({
@@ -110,13 +111,17 @@ async function main() {
 
     // Legacy scrypt/plaintext records cannot be converted without the original password.
     // Keep the surviving record but preserve it for login migration on the next successful sign-in.
-    if (keeper.email !== email) {
-      await db.collection('users').doc(keeper.id).set({ email }, { merge: true });
-      updatedCount += 1;
-    }
+    await db.collection('users').doc(keeper.id).set({
+      email,
+      isActive: true,
+      archivedAt: null,
+      supersededBy: null,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+    updatedCount += 1;
   }
 
-  console.log(`[Cleanup] Completed. Deleted ${deletedCount} duplicate docs, updated ${updatedCount} doc(s).`);
+  console.log(`[Cleanup] Completed. Inactivated ${inactivatedCount} duplicate docs, updated ${updatedCount} doc(s).`);
 }
 
 main().catch((error) => {

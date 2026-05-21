@@ -19,6 +19,14 @@ function getSortTimestamp(user) {
   return 0;
 }
 
+function isActiveUser(user) {
+  return user?.isActive !== false;
+}
+
+function isBcryptPassword(value) {
+  return typeof value === 'string' && value.startsWith('$2');
+}
+
 async function getAllUsers() {
   if (!db) return [];
   const snap = await db.collection('users').get();
@@ -40,11 +48,15 @@ async function createUser(user) {
   const coll = db.collection('users');
   const id = user.id ? String(user.id) : coll.doc().id;
   const data = sanitizeFirestoreData({ ...(user || {}) });
+  const now = new Date().toISOString();
   data.email = normalizeEmail(data.email);
   delete data.id;
   delete data.hashedPassword;
   delete data.passwordHash;
   delete data.passwordSalt;
+  data.updatedAt = data.updatedAt || now;
+  data.createdAt = data.createdAt || now;
+  data.isActive = data.isActive !== false;
 
   if (data.password) {
     try {
@@ -70,6 +82,7 @@ async function createUser(user) {
 async function updateUser(id, updates) {
   if (!db) throw new Error('Firebase not initialized');
   const nextUpdates = sanitizeFirestoreData({ ...(updates || {}) });
+  nextUpdates.updatedAt = nextUpdates.updatedAt || new Date().toISOString();
   if (Object.prototype.hasOwnProperty.call(nextUpdates, 'email')) {
     nextUpdates.email = normalizeEmail(nextUpdates.email);
   }
@@ -100,10 +113,15 @@ async function findByEmail(email) {
   if (snap.empty) return null;
 
   const candidates = snap.docs.map((doc) => ({ id: doc.id, ...serializeData(doc.data()) }));
-  const preferred = candidates.slice().sort((left, right) => getSortTimestamp(right) - getSortTimestamp(left))[0];
+  const sorted = candidates.slice().sort((left, right) => getSortTimestamp(right) - getSortTimestamp(left));
+  const preferred = sorted.find((candidate) => isActiveUser(candidate)) || sorted[0];
 
   if (candidates.length > 1) {
     console.warn(`[Firestore] Duplicate email records found for ${normalizedEmail}: ${candidates.length}. Using ${preferred.id}`);
+  }
+
+  if (!isActiveUser(preferred)) {
+    console.warn(`[Firestore] Inactive user record selected for ${normalizedEmail}: ${preferred.id}`);
   }
 
   _log('Read', 'users', `findByEmail=${normalizedEmail}`);

@@ -6,7 +6,6 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 // Note: local filesystem persistence removed — Firestore is the single source of truth.
 const crypto = require('crypto');
-const { promisify } = require('util');
 const { v4: uuidv4 } = require('uuid');
 const brevoSendOtp = require('./sendOtpEmail');
 const emailService = require('./services/emailService');
@@ -18,8 +17,6 @@ const notificationsRepo = require('./repositories/notificationsRepository');
 const reviewsRepo = require('./repositories/reviewsRepository');
 const activityRepo = require('./repositories/activityRepository');
 const { db: firestoreDb } = require('./config/firebase');
-
-const scryptAsync = promisify(crypto.scrypt);
 
 function normalizeEmail(email) {
   return String(email || '').toLowerCase().trim();
@@ -293,35 +290,25 @@ async function handleLogin(req, res) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    const provided = String(password);
-    let valid = false;
-    const passwordField = typeof user.password === 'string' ? user.password : '';
-    const passwordHashField = typeof user.passwordHash === 'string' ? user.passwordHash : '';
-    const passwordSaltField = typeof user.passwordSalt === 'string' ? user.passwordSalt : '';
-
-    // Primary case: bcrypt stored in `password` starting with $2
-    if (passwordField.startsWith('$2')) {
-      try { valid = await bcrypt.compare(provided, passwordField); } catch (e) { valid = false; }
+    if (user.isActive === false) {
+      console.log('[Auth] LOGIN FAILED - inactive user record', user.id);
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    // Legacy scrypt fallback for pre-cleanup accounts; successful login upgrades the record to bcrypt.
-    if (!valid && passwordHashField && passwordSaltField && !passwordHashField.startsWith('$2')) {
-      try {
-        const derived = (await scryptAsync(provided, passwordSaltField, 64)).toString('hex');
-        if (derived === passwordHashField) {
-          valid = true;
-          // migrate to bcrypt and remove scrypt fields
-          try {
-            const newHash = await bcrypt.hash(provided, 10);
-            await usersRepo.updateUser(user.id, { password: newHash, passwordHash: null, passwordSalt: null });
-            console.log('[Auth] Migrated scrypt password to bcrypt for user', user.id);
-          } catch (e) {
-            console.warn('[Auth] Password migration (scrypt->bcrypt) failed for user', user.id, e && e.message ? e.message : e);
-          }
-        }
-      } catch (e) {
-        console.warn('[Auth] scrypt verification failed', e && e.message ? e.message : e);
-      }
+    const provided = String(password);
+    const storedPassword = typeof user.password === 'string' ? user.password : '';
+    const isBcryptHash = storedPassword.startsWith('$2');
+    if (!isBcryptHash) {
+      console.warn('[Auth] LOGIN FAILED - non-bcrypt password hash for user', user.id);
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    let valid = false;
+    try {
+      valid = await bcrypt.compare(provided, storedPassword);
+    } catch (e) {
+      console.warn('[Auth] bcrypt compare failed', e && e.message ? e.message : e);
+      valid = false;
     }
 
     if (!valid) {
@@ -356,7 +343,7 @@ async function handleSignup(req, res) {
   try {
     // Ensure no existing user
     const existing = await usersRepo.findByEmail(email);
-    if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
+    if (existing && existing.isActive !== false) return res.status(409).json({ success: false, message: 'Email already registered' });
 
     // create user - usersRepo.createUser will hash password
     const userRecord = await usersRepo.createUser({ name, email, password, role, isActive: true, createdAt: new Date().toISOString() });
@@ -368,6 +355,53 @@ async function handleSignup(req, res) {
     return res.status(500).json({ success: false, message: 'Signup failed' });
   }
 }
+
+const authRouter = express.Router();
+authRouter.post('/login', handleLogin);
+authRouter.post('/signup', handleSignup);
+authRouter.post('/send-otp', handleSendOtp);
+authRouter.post('/verify-otp', handleVerifyOtp);
+authRouter.post('/forgot', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const user = await usersRepo.findByEmail(email);
+    if (!user) return res.status(200).json({ success: true });
+    const token = crypto.randomBytes(24).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await usersRepo.updateUser(user.id, { resetPasswordHash: tokenHash, resetPasswordExpiry: Date.now() + (60 * 60 * 1000) });
+    const resetLink = `${getFrontendBase(req)}/reset-password?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+    await sendPasswordResetEmail({ email, resetLink });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[Auth] Forgot password error:', error && error.message ? error.message : error);
+    return res.status(500).json({ success: false, message: 'Unable to process password reset' });
+  }
+});
+authRouter.post('/reset', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const token = String(req.body?.token || '').trim();
+    const password = String(req.body?.password || '');
+    if (!email || !token || !password) return res.status(400).json({ error: 'Email, token and password are required' });
+    const user = await usersRepo.findByEmail(email);
+    if (!user || !user.resetPasswordHash || !user.resetPasswordExpiry) return res.status(400).json({ error: 'Invalid or expired token' });
+    if (Date.now() > Number(user.resetPasswordExpiry)) return res.status(400).json({ error: 'Token has expired' });
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    if (tokenHash !== user.resetPasswordHash) return res.status(400).json({ error: 'Invalid token' });
+    const newHash = await bcrypt.hash(password, 10);
+    await usersRepo.updateUser(user.id, {
+      password: newHash,
+      resetPasswordHash: null,
+      resetPasswordExpiry: null,
+      updatedAt: new Date().toISOString(),
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[Auth] Reset password error:', error && error.message ? error.message : error);
+    return res.status(500).json({ success: false, message: 'Unable to reset password' });
+  }
+});
 
 async function handleSendOtp(req, res) {
   try {
@@ -627,16 +661,11 @@ ordersRouter.post('/:id/cancel', async (req, res) => {
   }
 });
 
-app.post(['/api/auth/login', '/login'], handleLogin);
-app.post(['/api/auth/signup', '/signup'], handleSignup);
-app.post(['/api/auth/send-otp', '/send-otp'], handleSendOtp);
-app.post(['/api/auth/verify-otp', '/verify-otp'], handleVerifyOtp);
-app.post('/api/users', handleSignup);
-
 app.use('/api/users', usersRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/orders', ordersRouter);
+app.use('/api/auth', authRouter);
 
 // Auth: request password reset
 app.post('/api/auth/forgot', async (req, res) => {
@@ -818,7 +847,7 @@ app.get('/', (req, res) => {
     endpoints: {
       users: {
         list: 'GET /api/users',
-        create: 'POST /api/users',
+        create: 'POST /api/auth/signup',
         update: 'PUT /api/users/:id'
       },
       products: {
@@ -844,113 +873,24 @@ app.get('/', (req, res) => {
 });
 
 // Notifications API
-app.get('/api/notifications', async (req, res) => {
-  try {
-    const userId = req.query.userId ? String(req.query.userId) : null;
-    const list = await notificationsRepo.getAllNotifications(userId);
-    return res.json(list);
-  } catch (e) {
-    console.error('[API] Failed to fetch notifications', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to fetch notifications' });
-  }
-});
-
-app.get('/api/notifications/unread-count', async (req, res) => {
-  try {
-    const userId = req.query.userId ? String(req.query.userId) : null;
-    if (!userId) return res.status(400).json({ error: 'userId required' });
-    const list = await notificationsRepo.getAllNotifications(userId);
-    const count = list.filter(n => !n.read).length;
-    return res.json({ unread: count });
-  } catch (e) {
-    console.error('[API] Failed to fetch unread count', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to fetch unread count' });
-  }
-});
-
 app.post('/api/notifications', async (req, res) => {
   try {
     const incoming = {
-      id: uuidv4(),
-      userId: String(req.body.userId || ''),
-      type: String(req.body.type || 'update'),
-      title: String(req.body.title || ''),
-      message: String(req.body.message || ''),
-      timestamp: req.body.timestamp || new Date().toISOString(),
-      read: Boolean(req.body.read || false),
-      actionUrl: req.body.actionUrl || null,
+      id: String(req.body?.id || uuidv4()),
+      ...req.body,
+      timestamp: req.body?.timestamp || new Date().toISOString(),
+      read: Boolean(req.body?.read),
     };
-    // Prevent obvious duplicates by checking recent notifications for user
-    const now = Date.now();
-    const recent = await notificationsRepo.getAllNotifications(incoming.userId);
-    const dup = recent.find(n => n.type === incoming.type && n.title === incoming.title && Math.abs(new Date(n.timestamp).getTime() - now) < 2000);
-    if (dup) return res.status(409).json({ error: 'duplicate' });
-
     const created = await notificationsRepo.createNotification(incoming);
-    try { if (io) io.to(`user_${created.userId}`).emit('notification:new', created); } catch (e) { console.warn('[Notifications] emit failed', e && e.message ? e.message : e); }
+    try {
+      if (io) io.to(`user_${created.userId}`).emit('notification:new', created);
+    } catch (e) {
+      console.warn('[Notifications] emit failed', e && e.message ? e.message : e);
+    }
     return res.status(201).json(created);
   } catch (e) {
     console.error('[API] Failed to create notification', e && e.message ? e.message : e);
     return res.status(500).json({ error: 'Unable to create notification' });
-  }
-});
-
-// Buyer cancels an order (allowed only before shipping/out-for-delivery/delivered)
-app.post('/api/orders/:id/cancel', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const existing = await ordersRepo.getOrderById(id);
-    if (!existing) return res.status(404).json({ error: 'Order not found' });
-
-    const disallowedDeliveryStatuses = ['out-for-delivery', 'delivered'];
-    const disallowedOrderStatuses = ['shipped', 'delivered', 'cancelled'];
-    if (disallowedDeliveryStatuses.includes(String(existing.deliveryStatus)) || disallowedOrderStatuses.includes(String(existing.status))) {
-      return res.status(400).json({ error: 'Order cannot be cancelled after shipping or delivery' });
-    }
-
-    const updates = { status: 'cancelled', deliveryStatus: 'cancelled' };
-    try { if (existing.paymentStatus === 'paid') updates.paymentStatus = 'refunded'; } catch (e) {}
-
-    const updated = await ordersRepo.updateOrder(id, updates);
-    await activityRepo.addActivityLog({ id: uuidv4(), userId: updated.buyerId, userName: updated.buyerName, userRole: 'buyer', action: 'cancelled order', targetId: updated.id, targetType: 'order', timestamp: new Date().toISOString() });
-
-    try {
-      const notifToFarmer = {
-        id: uuidv4(),
-        userId: updated.farmerId,
-        type: 'order',
-        title: 'Order cancelled by buyer',
-        message: `${updated.buyerName} cancelled order ${updated.id} for ${updated.productName}`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        actionUrl: '/orders'
-      };
-
-      const notifToBuyer = {
-        id: uuidv4(),
-        userId: updated.buyerId,
-        type: 'order',
-        title: 'Order cancelled',
-        message: `Your order ${updated.id} was cancelled successfully.`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        actionUrl: '/orders'
-      };
-
-      const nf1 = await notificationsRepo.createNotification(notifToFarmer);
-      const nf2 = await notificationsRepo.createNotification(notifToBuyer);
-      if (io) {
-        io.to(`user_${nf1.userId}`).emit('notification:new', nf1);
-        io.to(`user_${nf2.userId}`).emit('notification:new', nf2);
-        io.to(`user_${updated.farmerId}`).emit('order:cancelled', updated);
-        io.to(`user_${updated.buyerId}`).emit('order:cancelled', updated);
-      }
-    } catch (e) { console.warn('Failed to emit cancellation notifications', e && e.message ? e.message : e); }
-
-    return res.json(updated);
-  } catch (e) {
-    console.error('[API] Failed to cancel order', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Unable to cancel order' });
   }
 });
 
