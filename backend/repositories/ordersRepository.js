@@ -1,5 +1,5 @@
 const { db, admin } = require('../config/firebase');
-const { serializeData, setCollectionFromArray } = require('../services/firebaseService');
+const { serializeData, setCollectionFromArray, sanitizeFirestoreData } = require('../services/firebaseService');
 
 function _log(op, collection, details) {
   try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch (e) {}
@@ -25,7 +25,7 @@ async function createOrder(order) {
   if (!db) throw new Error('Firebase not initialized');
   const coll = db.collection('orders');
   const id = order.id ? String(order.id) : coll.doc().id;
-  const data = Object.assign({}, order, { createdAt: admin ? admin.firestore.FieldValue.serverTimestamp() : new Date().toISOString() });
+  const data = sanitizeFirestoreData({ ...(order || {}), createdAt: admin ? admin.firestore.FieldValue.serverTimestamp() : new Date().toISOString() });
   delete data.id;
   await coll.doc(id).set(data);
   const doc = await coll.doc(id).get();
@@ -37,7 +37,7 @@ async function createOrder(order) {
 async function updateOrder(id, updates) {
   if (!db) throw new Error('Firebase not initialized');
   const docRef = db.collection('orders').doc(String(id));
-  await docRef.set(updates, { merge: true });
+  await docRef.set(sanitizeFirestoreData({ ...(updates || {}) }), { merge: true });
   const doc = await docRef.get();
   const out = { id: doc.id, ...serializeData(doc.data()) };
   _log('UPDATE', 'orders', `id=${out.id}`);

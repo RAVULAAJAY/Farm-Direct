@@ -1,5 +1,5 @@
 const { db, admin } = require('../config/firebase');
-const { serializeData, setCollectionFromArray } = require('../services/firebaseService');
+const { serializeData, setCollectionFromArray, sanitizeFirestoreData } = require('../services/firebaseService');
 
 function _log(op, collection, details) {
   try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch (e) {}
@@ -25,7 +25,7 @@ async function addActivityLog(log) {
   if (!db) throw new Error('Firebase not initialized');
   const coll = db.collection('activityLogs');
   const id = log.id ? String(log.id) : coll.doc().id;
-  const data = Object.assign({}, log, { timestamp: admin ? admin.firestore.FieldValue.serverTimestamp() : new Date().toISOString() });
+  const data = sanitizeFirestoreData({ ...(log || {}), timestamp: admin ? admin.firestore.FieldValue.serverTimestamp() : new Date().toISOString() });
   delete data.id;
   await coll.doc(id).set(data);
   const doc = await coll.doc(id).get();

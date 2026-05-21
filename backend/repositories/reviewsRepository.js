@@ -1,5 +1,5 @@
 const { db, admin } = require('../config/firebase');
-const { serializeData } = require('../services/firebaseService');
+const { serializeData, sanitizeFirestoreData } = require('../services/firebaseService');
 
 function _log(op, collection, details) {
   try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch (e) {}
@@ -24,7 +24,7 @@ async function addReview(productId, review) {
 
     const reviewRef = reviewsRef.doc();
     const now = admin ? admin.firestore.FieldValue.serverTimestamp() : new Date().toISOString();
-    const reviewData = Object.assign({}, review, { productId: String(productId), createdAt: now });
+    const reviewData = sanitizeFirestoreData({ ...(review || {}), productId: String(productId), createdAt: now });
 
     tx.set(reviewRef, reviewData);
     tx.update(productRef, {

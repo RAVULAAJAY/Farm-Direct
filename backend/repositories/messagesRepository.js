@@ -1,5 +1,5 @@
 const { db, admin } = require('../config/firebase');
-const { serializeData, setCollectionFromArray } = require('../services/firebaseService');
+const { serializeData, setCollectionFromArray, sanitizeFirestoreData } = require('../services/firebaseService');
 
 function _log(op, collection, details) {
   try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch(e){}
@@ -25,7 +25,7 @@ async function createMessage(message) {
   if (!db) throw new Error('Firebase not initialized');
   const coll = db.collection('messages');
   const id = message.id ? String(message.id) : coll.doc().id;
-  const data = Object.assign({}, message, { timestamp: admin ? admin.firestore.FieldValue.serverTimestamp() : new Date().toISOString() });
+  const data = sanitizeFirestoreData({ ...(message || {}), timestamp: admin ? admin.firestore.FieldValue.serverTimestamp() : new Date().toISOString() });
   delete data.id;
   await coll.doc(id).set(data);
   const doc = await coll.doc(id).get();
@@ -37,7 +37,7 @@ async function createMessage(message) {
 async function updateMessage(id, updates) {
   if (!db) throw new Error('Firebase not initialized');
   const ref = db.collection('messages').doc(String(id));
-  await ref.set(updates, { merge: true });
+  await ref.set(sanitizeFirestoreData({ ...(updates || {}) }), { merge: true });
   const doc = await ref.get();
   const out = { id: doc.id, ...serializeData(doc.data()) };
   _log('Update', 'messages', `id=${out.id}`);

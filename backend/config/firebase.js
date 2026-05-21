@@ -18,6 +18,16 @@ function hasValidKey(k) {
   return typeof k === 'string' && k.indexOf('-----BEGIN PRIVATE KEY-----') !== -1;
 }
 
+function logMissingEnv(context, requiredKeys) {
+  const missing = requiredKeys.filter((key) => !String(process.env[key] || '').trim());
+  if (missing.length > 0) {
+    console.warn(`[Startup] Missing ${context} env vars: ${missing.join(', ')}`);
+  }
+  return missing;
+}
+
+logMissingEnv('Firebase', ['FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY']);
+
 try {
   // Prefer env-based credentials when present
   if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY && hasValidKey(FIREBASE_PRIVATE_KEY)) {

@@ -20,7 +20,47 @@ const activityRepo = require('./repositories/activityRepository');
 const scryptAsync = promisify(crypto.scrypt);
 
 function normalizeEmail(email) {
-  return String(email || '').trim().toLowerCase();
+  return String(email || '').toLowerCase().trim();
+}
+
+function sanitizeForLog(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    return '[unserializable payload]';
+  }
+}
+
+function validateStartupEnv() {
+  const checks = [
+    'JWT_SECRET',
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_CLIENT_EMAIL',
+    'FIREBASE_PRIVATE_KEY',
+    'BREVO_SMTP_USER',
+    'BREVO_SMTP_PASS',
+    'FRONTEND_URL',
+  ];
+  const missing = checks.filter((key) => !String(process.env[key] || '').trim());
+  if (missing.length > 0) {
+    console.warn('[Startup] Missing production env vars:', missing.join(', '));
+  } else {
+    console.log('[Startup] All required production env vars present');
+  }
+}
+
+function createAuthToken(user) {
+  const secret = String(process.env.JWT_SECRET || '').trim() || 'dev-only-fallback-secret';
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    sub: String(user.id || ''),
+    email: normalizeEmail(user.email),
+    role: String(user.role || ''),
+    name: String(user.name || ''),
+    iat: Math.floor(Date.now() / 1000),
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
+  return `${header}.${payload}.${signature}`;
 }
 
 // All transactional emails use Brevo via `emailService`.
@@ -32,15 +72,15 @@ function getFromAddress() {
 const otpStore = new Map(); // key: email, value: { otpHash, expiresAt }
 
 function storeOtp(email, otpHash, expiresAt) {
-  otpStore.set(String(email).toLowerCase(), { otpHash, expiresAt });
+  otpStore.set(normalizeEmail(email), { otpHash, expiresAt });
 }
 
 function getOtpEntry(email) {
-  return otpStore.get(String(email).toLowerCase()) || null;
+  return otpStore.get(normalizeEmail(email)) || null;
 }
 
 function deleteOtpEntry(email) {
-  return otpStore.delete(String(email).toLowerCase());
+  return otpStore.delete(normalizeEmail(email));
 }
 
 function cleanupExpiredOtps() {
@@ -269,8 +309,27 @@ app.get('/api/users', async (req, res) => {
 
 app.post('/api/users', async (req, res) => {
   try {
+    console.log('[Auth] SIGNUP START');
     const incoming = { ...req.body };
-    incoming.email = normalizeEmail(incoming.email);
+    const rawEmail = incoming.email;
+    const normalizedEmail = normalizeEmail(rawEmail);
+    if (rawEmail && normalizedEmail !== String(rawEmail).trim()) {
+      console.warn('[Auth] Email normalization adjusted the input email:', { rawEmail, normalizedEmail });
+    }
+
+    const requiredFields = ['name', 'email', 'password', 'role'];
+    const missingFields = requiredFields.filter((field) => !String(incoming[field] || '').trim());
+    if (missingFields.length > 0) {
+      console.warn('[Auth] SIGNUP VALIDATION FAILED:', sanitizeForLog({ missingFields, payload: incoming }));
+      return res.status(400).json({ success: false, message: 'Unable to create user', error: `Missing required fields: ${missingFields.join(', ')}` });
+    }
+
+    if (!['buyer', 'farmer', 'admin'].includes(String(incoming.role).toLowerCase())) {
+      console.warn('[Auth] SIGNUP VALIDATION FAILED: invalid role', sanitizeForLog({ role: incoming.role }));
+      return res.status(400).json({ success: false, message: 'Unable to create user', error: 'Invalid role' });
+    }
+
+    incoming.email = normalizedEmail;
     const plainPassword = typeof incoming.password === 'string' ? incoming.password : undefined;
     delete incoming.password;
 
@@ -282,19 +341,29 @@ app.post('/api/users', async (req, res) => {
       user.passwordHash = derived;
     }
 
+    console.log('[Firestore] WRITE - users/signup');
     const created = await usersRepo.createUser(user);
+    if (!created || !created.id) {
+      throw new Error('Firestore returned an empty user document after createUser');
+    }
     await activityRepo.addActivityLog({ id: uuidv4(), userId: created.id, userName: created.name, userRole: created.role, action: 'registered account', timestamp: new Date().toISOString() });
 
     const safe = { ...created };
     delete safe.passwordHash; delete safe.passwordSalt; delete safe.resetPasswordHash; delete safe.resetPasswordExpiry;
-    res.status(201).json(safe);
+    const token = createAuthToken(safe);
+    res.status(201).json({ success: true, user: safe, token });
+    console.log('[Auth] SIGNUP SUCCESS', { userId: safe.id, email: safe.email });
 
     try {
-      void emailService.sendAccountCreatedEmail(created).then(() => console.log('[Account Created] Email sent to', created.email)).catch(err => console.warn('[Account Created] Email failed for', created.email, err && err.message ? err.message : err));
-    } catch (e) { console.warn('[Account Created] Unexpected error triggering account email:', e && e.message ? e.message : e); }
+      await emailService.sendAccountCreatedEmail(created);
+      console.log('[Brevo] ACCOUNT CREATED EMAIL SENT', created.email);
+    } catch (mailError) {
+      console.error('[Brevo] EMAIL ERROR:', mailError && mailError.message ? mailError.message : mailError);
+    }
   } catch (e) {
-    console.error('[API] Failed to create user', e && e.message ? e.message : e);
-    res.status(500).json({ error: 'Unable to create user' });
+    console.error('[Auth] SIGNUP ERROR:', e);
+    console.error('[Auth] SIGNUP FAILED', e && e.message ? e.message : e);
+    res.status(500).json({ success: false, message: 'Unable to create user', error: e && e.message ? e.message : String(e) });
   }
 });
 
@@ -1074,6 +1143,7 @@ async function loadFromFirestore() {
 }
 
 (async () => {
+  validateStartupEnv();
   await loadFromFirestore();
   server.listen(listenTarget, listenHost, () => console.log(`Server running on port ${listenTarget}`));
 })();

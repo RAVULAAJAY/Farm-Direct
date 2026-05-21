@@ -4,6 +4,12 @@ function _isTimestamp(v) {
   return v && typeof v.toDate === 'function';
 }
 
+function _isPlainObject(value) {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function serializeData(obj) {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) return obj.map(serializeData);
@@ -29,6 +35,25 @@ function serializeData(obj) {
   return out;
 }
 
+function sanitizeFirestoreData(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeFirestoreData(item))
+      .filter((item) => item !== undefined);
+  }
+  if (!_isPlainObject(value)) return value;
+
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const sanitized = sanitizeFirestoreData(entry);
+    if (sanitized !== undefined) out[key] = sanitized;
+  }
+  return out;
+}
+
 async function listCollection(collectionName) {
   if (!db) return [];
   const snap = await db.collection(collectionName).get();
@@ -48,7 +73,7 @@ async function setCollectionFromArray(collectionName, items) {
     const id = item && item.id ? String(item.id) : collRef.doc().id;
     newIds.add(id);
     const docRef = collRef.doc(String(id));
-    const data = Object.assign({}, item);
+    const data = sanitizeFirestoreData({ ...(item || {}) });
     delete data.id;
     batch.set(docRef, data);
   }
@@ -107,6 +132,7 @@ async function deleteFile(path) {
 
 module.exports = {
   serializeData,
+  sanitizeFirestoreData,
   listCollection,
   setCollectionFromArray,
   uploadBase64,

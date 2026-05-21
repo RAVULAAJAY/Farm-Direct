@@ -1,5 +1,9 @@
 const { db } = require('../config/firebase');
-const { serializeData, setCollectionFromArray, listCollection } = require('../services/firebaseService');
+const { serializeData, setCollectionFromArray, listCollection, sanitizeFirestoreData } = require('../services/firebaseService');
+
+function normalizeEmail(email) {
+  return String(email || '').toLowerCase().trim();
+}
 
 function _log(op, collection, details) {
   try { console.log(`[Firestore] ${String(op).toUpperCase()} - ${collection}${details ? ` (${details})` : ''}`); } catch(e){}
@@ -25,39 +29,49 @@ async function createUser(user) {
   if (!db) throw new Error('Firebase not initialized');
   const coll = db.collection('users');
   const id = user.id ? String(user.id) : coll.doc().id;
-  const data = Object.assign({}, user);
-  if (typeof data.email === 'string') {
-    data.email = data.email.trim().toLowerCase();
-  }
+  const data = sanitizeFirestoreData({ ...(user || {}) });
+  data.email = normalizeEmail(data.email);
   delete data.id;
-  await coll.doc(id).set(data);
-  const doc = await coll.doc(id).get();
-  const out = { id: doc.id, ...serializeData(doc.data()) };
-  _log('Write', 'users', `id=${out.id}`);
-  return out;
+  try {
+    await coll.doc(id).set(data);
+    const doc = await coll.doc(id).get();
+    const out = { id: doc.id, ...serializeData(doc.data()) };
+    _log('Write', 'users', `id=${out.id}`);
+    return out;
+  } catch (error) {
+    console.error('[Firestore] ERROR - users/createUser', error && error.message ? error.message : error);
+    throw error;
+  }
 }
 
 async function updateUser(id, updates) {
   if (!db) throw new Error('Firebase not initialized');
-  const nextUpdates = { ...updates };
-  if (typeof nextUpdates.email === 'string') {
-    nextUpdates.email = nextUpdates.email.trim().toLowerCase();
+  const nextUpdates = sanitizeFirestoreData({ ...(updates || {}) });
+  if (Object.prototype.hasOwnProperty.call(nextUpdates, 'email')) {
+    nextUpdates.email = normalizeEmail(nextUpdates.email);
   }
   const docRef = db.collection('users').doc(String(id));
-  await docRef.set(nextUpdates, { merge: true });
-  const doc = await docRef.get();
-  const out = { id: doc.id, ...serializeData(doc.data()) };
-  _log('Update', 'users', `id=${out.id}`);
-  return out;
+  try {
+    await docRef.set(nextUpdates, { merge: true });
+    const doc = await docRef.get();
+    const out = { id: doc.id, ...serializeData(doc.data()) };
+    _log('Update', 'users', `id=${out.id}`);
+    return out;
+  } catch (error) {
+    console.error('[Firestore] ERROR - users/updateUser', error && error.message ? error.message : error);
+    throw error;
+  }
 }
 
 async function findByEmail(email) {
   if (!db) return null;
-  const snap = await db.collection('users').where('email', '==', String(email).trim().toLowerCase()).limit(1).get();
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+  const snap = await db.collection('users').where('email', '==', normalizedEmail).limit(1).get();
   if (snap.empty) return null;
   const d = snap.docs[0];
   const out = { id: d.id, ...serializeData(d.data()) };
-  _log('Read', 'users', `findByEmail=${email}`);
+  _log('Read', 'users', `findByEmail=${normalizedEmail}`);
   return out;
 }
 

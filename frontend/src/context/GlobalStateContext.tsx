@@ -621,16 +621,17 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
   const upsertUser = useCallback(async (user: User) => {
     try {
       const existing = users.find((entry) => entry.id === user.id);
+      const unwrapUserPayload = (payload: any) => payload?.user ?? payload;
 
       let savedUser: User;
       if (existing) {
-        savedUser = normalizeUserRecord(await api.updateUser(user.id, user as any));
+        savedUser = normalizeUserRecord(unwrapUserPayload(await api.updateUser(user.id, user as any)));
       } else {
         const payload = {
           ...user,
           joinedDate: user.createdAt ?? new Date().toISOString(),
         } as any;
-        savedUser = normalizeUserRecord(await api.createUser(payload));
+        savedUser = normalizeUserRecord(unwrapUserPayload(await api.createUser(payload)));
       }
 
       setUsers((prev) => {

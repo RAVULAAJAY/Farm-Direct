@@ -662,7 +662,11 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
 
       if (submitMode === 'login') {
         try {
-          const remoteUser = (await api.loginUser(normalizedEmail, formData.password)) as User;
+          const loginResponse = await api.loginUser(normalizedEmail, formData.password) as any;
+          const remoteUser = (loginResponse?.user ?? loginResponse) as User;
+          if (loginResponse?.token) {
+            localStorage.setItem('authToken', loginResponse.token);
+          }
           if (remoteUser.role !== role) {
             setGeneralError(`This account is not registered as a ${role}. Please select the correct role.`);
             return;
