@@ -432,13 +432,8 @@ function stripAuthFields(user) {
   return rest;
 }
 
-app.post(['/api/auth/login', '/login'], handleLogin);
-app.post(['/api/auth/signup', '/signup'], handleSignup);
-app.post(['/api/auth/send-otp', '/send-otp'], handleSendOtp);
-app.post(['/api/auth/verify-otp', '/verify-otp'], handleVerifyOtp);
-app.post('/api/users', handleSignup);
-
-app.get('/api/users', async (req, res) => {
+const usersRouter = express.Router();
+usersRouter.get('/', async (req, res) => {
   try {
     const users = await usersRepo.getAllUsers();
     return res.json(users.map(stripAuthFields));
@@ -447,8 +442,7 @@ app.get('/api/users', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to fetch users');
   }
 });
-
-app.put('/api/users/:id', async (req, res) => {
+usersRouter.put('/:id', async (req, res) => {
   try {
     const updated = await usersRepo.updateUser(req.params.id, req.body);
     return res.json(stripAuthFields(updated));
@@ -458,7 +452,8 @@ app.put('/api/users/:id', async (req, res) => {
   }
 });
 
-app.get('/api/products', async (req, res) => {
+const productsRouter = express.Router();
+productsRouter.get('/', async (req, res) => {
   try {
     return res.json(await productsRepo.getAllProducts());
   } catch (e) {
@@ -466,8 +461,7 @@ app.get('/api/products', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to fetch products');
   }
 });
-
-app.get('/api/products/:id', async (req, res) => {
+productsRouter.get('/:id', async (req, res) => {
   try {
     const product = await productsRepo.getProductById(req.params.id);
     if (!product) return sendJsonError(res, 404, 'Product not found');
@@ -477,8 +471,7 @@ app.get('/api/products/:id', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to fetch product');
   }
 });
-
-app.post('/api/products', async (req, res) => {
+productsRouter.post('/', async (req, res) => {
   try {
     const created = await productsRepo.createProduct(req.body || {});
     return res.status(201).json(created);
@@ -487,8 +480,7 @@ app.post('/api/products', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to create product');
   }
 });
-
-app.put('/api/products/:id', async (req, res) => {
+productsRouter.put('/:id', async (req, res) => {
   try {
     const updated = await productsRepo.updateProduct(req.params.id, req.body || {});
     return res.json(updated);
@@ -497,8 +489,7 @@ app.put('/api/products/:id', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to update product');
   }
 });
-
-app.delete('/api/products/:id', async (req, res) => {
+productsRouter.delete('/:id', async (req, res) => {
   try {
     await productsRepo.deleteProduct(req.params.id);
     return res.json({ success: true });
@@ -507,8 +498,7 @@ app.delete('/api/products/:id', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to delete product');
   }
 });
-
-app.post('/api/products/:id/reviews', async (req, res) => {
+productsRouter.post('/:id/reviews', async (req, res) => {
   try {
     await reviewsRepo.addReview(req.params.id, req.body || {});
     const updatedProduct = await productsRepo.getProductById(req.params.id);
@@ -523,7 +513,8 @@ app.post('/api/products/:id/reviews', async (req, res) => {
   }
 });
 
-app.get('/api/messages', async (req, res) => {
+const messagesRouter = express.Router();
+messagesRouter.get('/', async (req, res) => {
   try {
     return res.json(await messagesRepo.getAllMessages());
   } catch (e) {
@@ -531,8 +522,7 @@ app.get('/api/messages', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to fetch messages');
   }
 });
-
-app.get('/api/messages/:id', async (req, res) => {
+messagesRouter.get('/:id', async (req, res) => {
   try {
     const message = await messagesRepo.getMessageById(req.params.id);
     if (!message) return sendJsonError(res, 404, 'Message not found');
@@ -542,8 +532,7 @@ app.get('/api/messages/:id', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to fetch message');
   }
 });
-
-app.post('/api/messages', async (req, res) => {
+messagesRouter.post('/', async (req, res) => {
   try {
     const created = await messagesRepo.createMessage(req.body || {});
     try {
@@ -557,8 +546,7 @@ app.post('/api/messages', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to create message');
   }
 });
-
-app.put('/api/messages/:id', async (req, res) => {
+messagesRouter.put('/:id', async (req, res) => {
   try {
     const updated = await messagesRepo.updateMessage(req.params.id, req.body || {});
     try {
@@ -572,8 +560,7 @@ app.put('/api/messages/:id', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to update message');
   }
 });
-
-app.delete('/api/messages/:id', async (req, res) => {
+messagesRouter.delete('/:id', async (req, res) => {
   try {
     await messagesRepo.deleteMessage(req.params.id);
     return res.json({ success: true });
@@ -583,7 +570,8 @@ app.delete('/api/messages/:id', async (req, res) => {
   }
 });
 
-app.get('/api/orders', async (req, res) => {
+const ordersRouter = express.Router();
+ordersRouter.get('/', async (req, res) => {
   try {
     return res.json(await ordersRepo.getAllOrders());
   } catch (e) {
@@ -591,8 +579,7 @@ app.get('/api/orders', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to fetch orders');
   }
 });
-
-app.get('/api/orders/:id', async (req, res) => {
+ordersRouter.get('/:id', async (req, res) => {
   try {
     const order = await ordersRepo.getOrderById(req.params.id);
     if (!order) return sendJsonError(res, 404, 'Order not found');
@@ -602,8 +589,7 @@ app.get('/api/orders/:id', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to fetch order');
   }
 });
-
-app.post('/api/orders', async (req, res) => {
+ordersRouter.post('/', async (req, res) => {
   try {
     const created = await ordersRepo.createOrder(req.body || {});
     try {
@@ -618,6 +604,39 @@ app.post('/api/orders', async (req, res) => {
     return sendJsonError(res, 500, 'Unable to create order');
   }
 });
+ordersRouter.put('/:id', async (req, res) => {
+  try {
+    const previous = await ordersRepo.getOrderById(req.params.id);
+    if (!previous) return sendJsonError(res, 404, 'Order not found');
+    const updated = await ordersRepo.updateOrder(req.params.id, req.body);
+    return res.json(updated);
+  } catch (e) {
+    console.error('[API] Failed to update order', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to update order');
+  }
+});
+ordersRouter.post('/:id/cancel', async (req, res) => {
+  try {
+    const existing = await ordersRepo.getOrderById(req.params.id);
+    if (!existing) return sendJsonError(res, 404, 'Order not found');
+    const updated = await ordersRepo.updateOrder(req.params.id, { status: 'cancelled', deliveryStatus: 'cancelled' });
+    return res.json(updated);
+  } catch (e) {
+    console.error('[API] Failed to cancel order', e && e.message ? e.message : e);
+    return sendJsonError(res, 500, 'Unable to cancel order');
+  }
+});
+
+app.post(['/api/auth/login', '/login'], handleLogin);
+app.post(['/api/auth/signup', '/signup'], handleSignup);
+app.post(['/api/auth/send-otp', '/send-otp'], handleSendOtp);
+app.post(['/api/auth/verify-otp', '/verify-otp'], handleVerifyOtp);
+app.post('/api/users', handleSignup);
+
+app.use('/api/users', usersRouter);
+app.use('/api/products', productsRouter);
+app.use('/api/messages', messagesRouter);
+app.use('/api/orders', ordersRouter);
 
 // Auth: request password reset
 app.post('/api/auth/forgot', async (req, res) => {
