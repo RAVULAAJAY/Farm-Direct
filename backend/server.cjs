@@ -260,15 +260,28 @@ async function sendOrderStatusEmailToBuyer(order) {
 
 const app = express();
 const allowedOrigin = String(process.env.FRONTEND_URL || 'https://farm-direct-zeta-swart.vercel.app').trim().replace(/\/$/, '');
+const allowedOrigins = new Set([
+  allowedOrigin,
+  'https://farm-direct-zeta-swart.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+]);
 const corsOptions = {
-  origin: allowedOrigin,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.has(origin)) return callback(null, true);
+    if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
@@ -977,6 +990,8 @@ app.get('/api/debug/otp-config', (req, res) => {
   });
 });
 
+app.use((_, res) => res.status(404).json({ success: false, error: 'Not found', message: 'Route not found' }));
+
 app.use((err, req, res, next) => {
   console.error('[API] Unhandled error:', err && err.stack ? err.stack : err);
   if (res.headersSent) return next(err);
@@ -987,8 +1002,6 @@ app.use((err, req, res, next) => {
 
   return sendJsonError(res, 500, 'Internal server error');
 });
-
-app.use((_, res) => res.status(404).json({ success: false, error: 'Not found', message: 'Route not found' }));
 
 async function loadFromFirestore() {
   // Enforce Firestore as the single source of truth.

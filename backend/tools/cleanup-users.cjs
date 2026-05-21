@@ -7,14 +7,6 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
-function scoreUser(user) {
-  const updatedAt = Date.parse(user.updatedAt || user.createdAt || user.joinedDate || '') || 0;
-
-  return {
-    updatedAt,
-  };
-}
-
 function isBcryptPassword(value) {
   return typeof value === 'string' && value.startsWith('$2');
 }
@@ -54,7 +46,7 @@ async function main() {
   console.log(JSON.stringify(report, null, 2));
 
   if (!apply) {
-    console.log('Dry run only. Re-run with --apply to delete duplicate docs and normalize bcrypt-backed records.');
+    console.log('Dry run only. Re-run with --apply to inactivate duplicate docs and normalize keeper records.');
     return;
   }
 
@@ -63,10 +55,9 @@ async function main() {
 
   for (const [email, items] of grouped.entries()) {
     const sorted = items.slice().sort((left, right) => {
-      const leftScore = scoreUser(left);
-      const rightScore = scoreUser(right);
-      if (rightScore.rank !== leftScore.rank) return rightScore.rank - leftScore.rank;
-      return rightScore.updatedAt - leftScore.updatedAt;
+      const leftUpdatedAt = Date.parse(left.updatedAt || left.createdAt || left.joinedDate || '') || 0;
+      const rightUpdatedAt = Date.parse(right.updatedAt || right.createdAt || right.joinedDate || '') || 0;
+      return rightUpdatedAt - leftUpdatedAt;
     });
 
     const keeper = sorted[0];

@@ -1,16 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 
-// Default to the deployed backend unless an explicit Vite env override is provided.
-const rawApiBase = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? 'https://farm-direct-api.onrender.com/api';
-const normalizedApiBase = rawApiBase.replace(/\/$/, '').replace(/\/api\/?$/, '/api');
-const SERVER = /^https:\/\/farm-direct-api\.onrender\.com\/api$/i.test(normalizedApiBase)
-  ? normalizedApiBase.replace(/\/api\/?$/, '')
-  : 'https://farm-direct-api.onrender.com';
+const SERVER = 'https://farm-direct-api.onrender.com';
 
-// Log socket configuration (development only)
 if (import.meta.env.DEV) {
-  console.log('[Socket Config] VITE_API_BASE:', import.meta.env.VITE_API_BASE);
-  console.log('[Socket Config] VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
   console.log('[Socket Config] Server URL:', SERVER);
 }
 
@@ -18,12 +10,10 @@ let socket: Socket | null = null;
 
 export function initSocket() {
   if (socket) {
-    console.log('[Socket] Socket already initialized, returning existing');
     return socket;
   }
   
   try {
-    console.log('[Socket] Initializing connection to:', SERVER);
     socket = io(SERVER, {
       path: '/socket.io',
       transports: ['polling', 'websocket'],
@@ -58,7 +48,6 @@ export function initSocket() {
 
 export function getSocket() {
   if (!socket) {
-    console.warn('[Socket] Socket not initialized, attempting to initialize');
     return initSocket();
   }
   return socket;
@@ -66,47 +55,37 @@ export function getSocket() {
 
 export function joinUserRoom(userId: string) {
   if (!socket || !userId) {
-    console.warn('[Socket] Cannot join room: socket unavailable or no userId');
     return;
   }
-  console.log('[Socket] Joining room for user:', userId);
   socket.emit('join', String(userId));
 }
 
 export function leaveUserRoom(userId: string) {
   if (!socket || !userId) {
-    console.warn('[Socket] Cannot leave room: socket unavailable or no userId');
     return;
   }
-  console.log('[Socket] Leaving room for user:', userId);
   socket.emit('leave', String(userId));
 }
 
 export function on(event: string, cb: (...args: any[]) => void) {
   if (!socket) {
-    console.warn('[Socket] Cannot register listener: socket unavailable');
     return;
   }
-  console.log('[Socket] Registering listener for event:', event);
   socket.on(event, cb);
 }
 
 export function off(event: string, cb?: (...args: any[]) => void) {
   if (!socket) {
-    console.warn('[Socket] Cannot unregister listener: socket unavailable');
     return;
   }
-  console.log('[Socket] Unregistering listener for event:', event);
   if (cb) socket.off(event, cb);
   else socket.removeAllListeners(event);
 }
 
 export function emit(event: string, payload?: any) {
   if (!socket) {
-    console.warn('[Socket] Cannot emit event: socket unavailable');
     return;
   }
-  console.log('[Socket] Emitting event:', event, payload);
   socket.emit(event, payload);
 }
 
