@@ -307,8 +307,9 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-app.post('/api/users', async (req, res) => {
+const signupHandler = async (req, res) => {
   try {
+    console.log('REQ BODY', req.body);
     console.log('[Auth] SIGNUP START');
     const incoming = { ...req.body };
     const rawEmail = incoming.email;
@@ -365,7 +366,10 @@ app.post('/api/users', async (req, res) => {
     console.error('[Auth] SIGNUP FAILED', e && e.message ? e.message : e);
     res.status(500).json({ success: false, message: 'Unable to create user', error: e && e.message ? e.message : String(e) });
   }
-});
+};
+
+app.post('/api/users', signupHandler);
+app.post('/api/auth/signup', signupHandler);
 
 // legacy OTP persistence removed; using ephemeral in-memory OTP store (see storeOtp/getOtpEntry)
 

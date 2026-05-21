@@ -739,7 +739,17 @@ const EnhancedAuthForm: React.FC<EnhancedAuthFormProps> = ({ role, mode, onSucce
           createdAt: new Date().toISOString(),
         };
 
-      const savedUser = await upsertUser(user);
+      if (!formData.password || formData.password.trim().length === 0) {
+        setGeneralError('Password is required to create your account.');
+        return;
+      }
+
+      const signupUserPayload = {
+        ...user,
+        password: formData.password,
+      } as User;
+
+      const savedUser = await upsertUser(signupUserPayload);
       onSuccess(savedUser ?? user);
     } catch (error) {
       console.error('Auth form submission error:', error);

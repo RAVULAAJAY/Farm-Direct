@@ -52,7 +52,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const fetchUsers = () => request<User[]>('/users');
-export const createUser = (user: Omit<User, 'id'>) => request<User>('/users', { method: 'POST', body: JSON.stringify(user) });
+export const createUser = (user: Omit<User, 'id'> & { password?: string }) => request<Record<string, any>>('/users', { method: 'POST', body: JSON.stringify(user) });
 export const updateUser = (id: string, updates: Partial<User>) => request<User>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export const fetchProducts = () => request<Product[]>('/products');

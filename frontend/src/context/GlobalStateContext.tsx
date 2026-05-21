@@ -630,7 +630,9 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({
         const payload = {
           ...user,
           joinedDate: user.createdAt ?? new Date().toISOString(),
+          password: (user as any).password,
         } as any;
+        console.log('SIGNUP PAYLOAD', payload);
         savedUser = normalizeUserRecord(unwrapUserPayload(await api.createUser(payload)));
       }
 
