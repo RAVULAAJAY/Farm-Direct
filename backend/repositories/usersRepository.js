@@ -78,12 +78,23 @@ async function findByEmail(email) {
   if (!db) return null;
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) return null;
-  const snap = await db.collection('users').where('email', '==', normalizedEmail).limit(1).get();
+  const snap = await db.collection('users').where('email', '==', normalizedEmail).get();
   if (snap.empty) return null;
-  const d = snap.docs[0];
-  const out = { id: d.id, ...serializeData(d.data()) };
+
+  const candidates = snap.docs.map((doc) => ({ id: doc.id, ...serializeData(doc.data()) }));
+  const preferred = candidates.find((candidate) => {
+    const hasBcryptPassword = typeof candidate.password === 'string' && candidate.password.startsWith('$2');
+    const hasPlainPassword = typeof candidate.password === 'string' && candidate.password.length > 0 && !candidate.password.startsWith('$2');
+    const hasLegacyScrypt = typeof candidate.passwordHash === 'string' && typeof candidate.passwordSalt === 'string';
+    return hasBcryptPassword || hasPlainPassword || hasLegacyScrypt;
+  }) || candidates[0];
+
+  if (candidates.length > 1) {
+    console.warn(`[Firestore] Duplicate email records found for ${normalizedEmail}: ${candidates.length}. Using ${preferred.id}`);
+  }
+
   _log('Read', 'users', `findByEmail=${normalizedEmail}`);
-  return out;
+  return preferred;
 }
 
 async function getUserById(id) {
