@@ -17,6 +17,7 @@ const messagesRepo = require('./repositories/messagesRepository');
 const notificationsRepo = require('./repositories/notificationsRepository');
 const reviewsRepo = require('./repositories/reviewsRepository');
 const activityRepo = require('./repositories/activityRepository');
+const { db: firestoreDb } = require('./config/firebase');
 
 const scryptAsync = promisify(crypto.scrypt);
 
@@ -762,9 +763,9 @@ async function loadFromFirestore() {
   }
   try {
     // Firestore mode: verify connectivity before starting server.
-    if (!db) throw new Error('Firestore `db` is not initialized');
+    if (!firestoreDb) throw new Error('Firestore `db` is not initialized');
     // perform a simple read to validate permissions/connectivity
-    await db.collection('users').limit(1).get();
+    await firestoreDb.collection('users').limit(1).get();
     console.log('[Firestore] Data layer reachable');
   } catch (e) {
     console.error('[Firestore] Initialization check failed:', e && e.stack ? e.stack : e);
