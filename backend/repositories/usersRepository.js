@@ -100,15 +100,7 @@ async function findByEmail(email) {
   if (snap.empty) return null;
 
   const candidates = snap.docs.map((doc) => ({ id: doc.id, ...serializeData(doc.data()) }));
-  const preferred = candidates
-    .slice()
-    .sort((left, right) => getSortTimestamp(right) - getSortTimestamp(left))
-    .find((candidate) => {
-      const hasBcryptPassword = typeof candidate.password === 'string' && candidate.password.startsWith('$2');
-      const hasPlainPassword = typeof candidate.password === 'string' && candidate.password.length > 0 && !candidate.password.startsWith('$2');
-      const hasLegacyScrypt = typeof candidate.passwordHash === 'string' && typeof candidate.passwordSalt === 'string';
-      return hasBcryptPassword || hasPlainPassword || hasLegacyScrypt;
-    }) || candidates.slice().sort((left, right) => getSortTimestamp(right) - getSortTimestamp(left))[0];
+  const preferred = candidates.slice().sort((left, right) => getSortTimestamp(right) - getSortTimestamp(left))[0];
 
   if (candidates.length > 1) {
     console.warn(`[Firestore] Duplicate email records found for ${normalizedEmail}: ${candidates.length}. Using ${preferred.id}`);

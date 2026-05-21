@@ -295,40 +295,16 @@ async function handleLogin(req, res) {
 
     const provided = String(password);
     let valid = false;
-    const legacyBcryptHash = typeof user.hashedPassword === 'string' ? user.hashedPassword : '';
     const passwordField = typeof user.password === 'string' ? user.password : '';
     const passwordHashField = typeof user.passwordHash === 'string' ? user.passwordHash : '';
     const passwordSaltField = typeof user.passwordSalt === 'string' ? user.passwordSalt : '';
 
-    // Case 1: bcrypt stored in `password` starting with $2
+    // Primary case: bcrypt stored in `password` starting with $2
     if (passwordField.startsWith('$2')) {
       try { valid = await bcrypt.compare(provided, passwordField); } catch (e) { valid = false; }
     }
 
-    // Case 1b: older docs may store bcrypt in `hashedPassword` or `passwordHash`
-    if (!valid && legacyBcryptHash.startsWith('$2')) {
-      try { valid = await bcrypt.compare(provided, legacyBcryptHash); } catch (e) { valid = false; }
-    }
-    if (!valid && passwordHashField.startsWith('$2')) {
-      try { valid = await bcrypt.compare(provided, passwordHashField); } catch (e) { valid = false; }
-    }
-
-    // Case 2: legacy plaintext stored in `password`
-    if (!valid && passwordField && !passwordField.startsWith('$2')) {
-      if (provided === passwordField) {
-        valid = true;
-        // migrate plaintext -> bcrypt
-        try {
-          const newHash = await bcrypt.hash(provided, 10);
-          await usersRepo.updateUser(user.id, { password: newHash });
-          console.log('[Auth] Migrated plaintext password to bcrypt for user', user.id);
-        } catch (e) {
-          console.warn('[Auth] Password migration failed for user', user.id, e && e.message ? e.message : e);
-        }
-      }
-    }
-
-    // Case 3: scrypt-based stored as passwordHash + passwordSalt (from reset flow)
+    // Legacy scrypt fallback for pre-cleanup accounts; successful login upgrades the record to bcrypt.
     if (!valid && passwordHashField && passwordSaltField && !passwordHashField.startsWith('$2')) {
       try {
         const derived = (await scryptAsync(provided, passwordSaltField, 64)).toString('hex');
