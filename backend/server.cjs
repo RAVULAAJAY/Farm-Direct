@@ -309,24 +309,70 @@ async function handleLogin(req, res) {
     }
 
     const provided = String(password);
-    const storedPassword = typeof user.password === 'string' ? user.password : '';
-    const isBcryptHash = storedPassword.startsWith('$2');
-    if (!isBcryptHash) {
-      console.warn('[Auth] LOGIN FAILED - non-bcrypt password hash for user', user.id);
+    // Stored password may be in different legacy fields. Prefer `password`,
+    // then `passwordHash` or `hashedPassword` for older records.
+    const storedPassword = (typeof user.password === 'string' && user.password)
+      || (typeof user.passwordHash === 'string' && user.passwordHash)
+      || (typeof user.hashedPassword === 'string' && user.hashedPassword)
+      || '';
+
+    const isBcryptHash = typeof storedPassword === 'string' && storedPassword.startsWith('$2');
+
+    // Handle missing stored password
+    if (!storedPassword) {
+      console.log('[Auth] LOGIN FAILED - no stored password for user', user.id);
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    let valid = false;
-    try {
-      valid = await bcrypt.compare(provided, storedPassword);
-    } catch (e) {
-      console.warn('[Auth] bcrypt compare failed', e && e.message ? e.message : e);
-      valid = false;
-    }
-
-    if (!valid) {
-      console.log('[Auth] LOGIN FAILED - invalid password for user', user.id);
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    // If the stored password is a bcrypt hash, compare normally.
+    if (isBcryptHash) {
+      let valid = false;
+      try {
+        valid = await bcrypt.compare(provided, storedPassword);
+      } catch (e) {
+        console.warn('[Auth] bcrypt compare failed', e && e.message ? e.message : e);
+        valid = false;
+      }
+      if (!valid) {
+        console.log('[Auth] LOGIN FAILED - invalid password for user', user.id);
+        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      }
+    } else {
+      // Legacy non-bcrypt value detected. Attempt a safe one-time migration:
+      // - If stored value equals provided password (legacy plain-text), re-hash
+      //   with bcrypt and update the user record atomically.
+      // - Otherwise reject.
+      try {
+        if (storedPassword === provided) {
+          // Migrate to bcrypt hash
+          try {
+            const newHash = await bcrypt.hash(provided, 10);
+            // Update user record: set `password` to bcrypt hash and remove legacy fields
+            try {
+              await usersRepo.updateUser(user.id, {
+                password: newHash,
+                passwordHash: null,
+                hashedPassword: null,
+                passwordSalt: null,
+                updatedAt: new Date().toISOString(),
+              });
+              console.log('[Auth] MIGRATED legacy password to bcrypt for user', user.id);
+            } catch (updErr) {
+              console.warn('[Auth] Failed to update migrated password for user', user.id, updErr && updErr.message ? updErr.message : updErr);
+              // Even if update fails, do not block login if password matched.
+            }
+          } catch (hashErr) {
+            console.warn('[Auth] Failed to bcrypt-hash during migration for user', user.id, hashErr && hashErr.message ? hashErr.message : hashErr);
+            // continue and allow login if plain match succeeded
+          }
+        } else {
+          console.log('[Auth] LOGIN FAILED - legacy password mismatch for user', user.id);
+          return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        }
+      } catch (e) {
+        console.error('[Auth] Legacy login migration error:', e && e.message ? e.message : e);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+      }
     }
 
     const token = createAuthToken(user);
